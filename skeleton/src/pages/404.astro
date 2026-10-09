@@ -1,0 +1,27 @@
+---
+/**
+ * Standalone rather than built on Layout: CloudFront serves this for every unknown URL, so it must
+ * render even when the route registry is broken.
+ */
+import "../styles/global.css";
+import { tokenCss } from "../theme/tokens.js";
+---
+
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Page not found</title>
+        <meta name="robots" content="noindex, follow" />
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <style is:global set:html={tokenCss()}></style>
+    </head>
+    <body>
+        <main class="container section">
+            <h1>Page not found</h1>
+            <p>The page you asked for does not exist. It may have been moved or removed.</p>
+            <p><a href="/">Return to the home page</a></p>
+        </main>
+    </body>
+</html>

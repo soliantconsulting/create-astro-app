@@ -1,0 +1,97 @@
+/**
+ * The single source of truth for every URL on this site.
+ *
+ * Titles, descriptions, navigation and the sitemap all read from this one array. A page cannot set
+ * its own title: Layout resolves it from here by path. Adding a page without registering it fails
+ * the build (see scripts/seo-check.ts).
+ */
+
+export type ChangeFreq = "always" | "hourly" | "daily" | "weekly" | "monthly" | "yearly" | "never";
+
+export type RouteSeo = {
+    /** Path as served: a leading and trailing slash, except the root. */
+    path: string;
+    /** Full <title>. Must be unique across the site. */
+    title: string;
+    /** Meta description. Must be unique across the site. */
+    description: string;
+    /** Label in the primary navigation. Omit to keep the page out of the nav. */
+    navLabel?: string;
+    /** Parent path, for breadcrumbs. */
+    parent?: string;
+    /** False emits noindex and keeps the page out of the sitemap. */
+    indexable: boolean;
+    changefreq?: ChangeFreq;
+    priority?: number;
+};
+
+export const routes: RouteSeo[] = [
+    {
+        path: "/",
+        title: "{{project.title}}",
+        description: "Welcome to {{project.title}}.",
+        navLabel: "Home",
+        indexable: true,
+        changefreq: "monthly",
+        priority: 1,
+    },
+    {
+        path: "/about/",
+        title: "About | {{project.title}}",
+        description: "Learn more about {{project.title}}.",
+        navLabel: "About",
+        indexable: true,
+        changefreq: "yearly",
+        priority: 0.8,
+    },
+    {%- if contactForm %}
+    {
+        path: "/contact/",
+        title: "Contact | {{project.title}}",
+        description: "Get in touch with {{project.title}}.",
+        navLabel: "Contact",
+        indexable: true,
+        changefreq: "yearly",
+        priority: 0.8,
+    },
+    {
+        path: "/thank-you/",
+        title: "Thank you | {{project.title}}",
+        description: "Your message has been sent to {{project.title}}.",
+        indexable: false,
+    },
+    {%- endif %}
+];
+
+const routesByPath = new Map(routes.map((route) => [route.path, route]));
+
+export const getRoute = (path: string): RouteSeo => {
+    const route = routesByPath.get(path);
+
+    if (!route) {
+        throw new Error(
+            `No route registered for "${path}". Add it to src/seo/routes.ts so its title, ` +
+                "description and sitemap entry come from one place.",
+        );
+    }
+
+    return route;
+};
+
+export const navRoutes = (): RouteSeo[] => routes.filter((route) => route.navLabel !== undefined);
+
+export const indexableRoutes = (): RouteSeo[] => routes.filter((route) => route.indexable);
+
+export const canonicalUrl = (path: string, site: URL): string => new URL(path, site).href;
+
+export const breadcrumbTrail = (path: string): RouteSeo[] => {
+    const trail: RouteSeo[] = [];
+    let current: RouteSeo | undefined = getRoute(path);
+
+    while (current) {
+        trail.unshift(current);
+        current = current.parent === undefined ? undefined : routesByPath.get(current.parent);
+    }
+
+    return trail;
+};

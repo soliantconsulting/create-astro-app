@@ -1,0 +1,150 @@
+import { randomUUID } from "node:crypto";
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+    GetSecretValueCommand,
+    ResourceNotFoundException,
+    SecretsManagerClient,
+} from "@aws-sdk/client-secrets-manager";
+import { SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
+import { Temporal } from "temporal-polyfill";
+import { z } from "zod";
+import { contactForms } from "../../src/forms/contact-forms.js";
+import { createIntakeHandler } from "./intake.js";
+import { verifyRecaptcha } from "./recaptcha.js";
+{%- if sentry %}
+import { reportError, wrapHandler } from "./sentry.js";
+{%- endif %}
+
+const configSchema = z.object({
+    QUEUE_URL: z.url(),
+    QUARANTINE_BUCKET: z.string().min(1),
+    RECAPTCHA_SECRET_NAME: z.string().min(1),
+    RECAPTCHA_SITE_KEY: z.string(),
+    RECAPTCHA_MIN_SCORE: z.coerce.number().min(0).max(1),
+    ALLOWED_HOSTNAMES: z
+        .string()
+        .transform((value) => value.split(",").map((hostname) => hostname.trim()))
+        .pipe(z.array(z.string().min(1)).min(1)),
+});
+
+const config = configSchema.parse(process.env);
+const sqs = new SQSClient({});
+const s3 = new S3Client({});
+const secretsManager = new SecretsManagerClient({});
+
+// Re-read the secret every few minutes, so adding or rotating it takes effect without a deploy.
+const SECRET_CACHE_MILLISECONDS = 5 * 60 * 1000;
+
+type CachedSecret = {
+    value: string | null;
+    expiresAt: number;
+};
+
+let cachedSecret: CachedSecret | null = null;
+
+const readSecret = async (): Promise<string | null> => {
+    try {
+        const result = await secretsManager.send(
+            new GetSecretValueCommand({ SecretId: config.RECAPTCHA_SECRET_NAME }),
+        );
+        const value = result.SecretString?.trim() ?? "";
+        return value === "" ? null : value;
+    } catch (error) {
+        if (error instanceof ResourceNotFoundException) {
+            return null;
+        }
+
+        throw error;
+    }
+};
+
+const loadSecret = async (): Promise<string | null> => {
+    const now = Temporal.Now.instant().epochMilliseconds;
+
+    if (cachedSecret !== null && cachedSecret.expiresAt > now) {
+        return cachedSecret.value;
+    }
+
+    const value = await readSecret();
+    cachedSecret = { value, expiresAt: now + SECRET_CACHE_MILLISECONDS };
+    return value;
+};
+
+const handler = createIntakeHandler({
+    forms: contactForms,
+    verifyRecaptcha: async (token, action) => {
+        // A page built without a site key never sends a token, so checking against a stored secret
+        // would turn every visitor away, and a secret that cannot be read changes nothing. Half a
+        // configuration is a mistake worth an alarm.
+        if (config.RECAPTCHA_SITE_KEY === "") {
+            const storedSecret = await loadSecret().catch((error: unknown) => {
+                console.warn("Could not check for a stored reCAPTCHA secret", { error });
+                return null;
+            });
+
+            if (storedSecret !== null) {
+                console.error(
+                    "A reCAPTCHA secret is stored but the site was built without a site key; rebuild with PUBLIC_RECAPTCHA_SITE_KEY",
+                );
+            }
+
+            return { kind: "unconfigured" };
+        }
+
+        let secret: string | null;
+
+        try {
+            secret = await loadSecret();
+        } catch (error) {
+            console.error("Failed to read the reCAPTCHA secret", { error });
+            return { kind: "unavailable", reason: "the reCAPTCHA secret could not be read" };
+        }
+
+        if (secret === null) {
+            console.error(
+                `The site has a reCAPTCHA site key but no secret is stored at ${config.RECAPTCHA_SECRET_NAME}`,
+            );
+        }
+
+        return verifyRecaptcha({
+            secret,
+            token,
+            expectedAction: action,
+            allowedHostnames: config.ALLOWED_HOSTNAMES,
+            minScore: config.RECAPTCHA_MIN_SCORE,
+        });
+    },
+    enqueue: async (message) => {
+        await sqs.send(
+            new SendMessageCommand({
+                QueueUrl: config.QUEUE_URL,
+                MessageBody: JSON.stringify(message),
+            }),
+        );
+    },
+    quarantine: async (submission) => {
+        await s3.send(
+            new PutObjectCommand({
+                Bucket: config.QUARANTINE_BUCKET,
+                Key: `quarantine/${submission.receivedAt.slice(0, 10)}/${randomUUID()}.json`,
+                Body: JSON.stringify(submission, null, 2),
+                ContentType: "application/json",
+            }),
+        );
+    },
+    now: () => Temporal.Now.instant(),
+    {%- if sentry %}
+    report: reportError,
+    {%- else %}
+    report: () => {
+        // No error tracker is configured. Every report site also logs at error level, which the
+        // CloudWatch alarm in cdk/src/contact-form.ts watches.
+    },
+    {%- endif %}
+});
+
+{%- if sentry %}
+export const main = wrapHandler(handler);
+{%- else %}
+export const main = handler;
+{%- endif %}
