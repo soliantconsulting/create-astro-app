@@ -5,9 +5,13 @@ import {
     createSynthTask,
     execute,
     type ProjectContext,
+    type SentryContext,
 } from "@soliantconsulting/starter-lib";
-import type { FeaturesContext } from "./features.js";
+import type { ContactFormContext } from "./contact-form.js";
 import type { StagingDomainContext } from "./staging-domain.js";
+
+type SynthContext = ProjectContext &
+    Partial<AwsEnvContext & StagingDomainContext & SentryContext & ContactFormContext>;
 
 export const synthTask = createSynthTask(
     fileURLToPath(new URL("../../skeleton", import.meta.url)),
@@ -19,10 +23,7 @@ export const synthTask = createSynthTask(
                 });
             }
         },
-        ignoreList: (
-            context: ProjectContext &
-                Partial<AwsEnvContext & FeaturesContext & StagingDomainContext>,
-        ) => {
+        ignoreList: (context: SynthContext) => {
             const list: string[] = [];
 
             if (!context.awsEnv) {
@@ -34,8 +35,17 @@ export const synthTask = createSynthTask(
                 list.push(".sld-dns-control.json.liquid");
             }
 
-            if (!context.features?.includes("contact-form")) {
+            if (!context.sentry) {
+                list.push("sentry.client.config.js.liquid");
+                list.push("functions/contact-form/sentry.ts");
+            }
+
+            if (!context.contactForm) {
+                list.push("functions");
+                list.push("test");
                 list.push("src/forms");
+                list.push("src/components/ContactForm.astro");
+                list.push("src/components/Honeypot.astro");
                 list.push("src/pages/contact.astro");
                 list.push("src/pages/thank-you.astro");
                 list.push("cdk/src/contact-form.ts.liquid");

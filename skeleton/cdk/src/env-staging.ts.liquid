@@ -10,14 +10,29 @@ new AppStack(app, "{{project.name}}-staging", {
     },
     certificateArn: "{{stagingDomain.certificateArn}}",
     domainName: "{{stagingDomain.domainName}}",
+    allowIndexing: false,
     buildEnv: {
         {%- if sentry %}
         SENTRY_ENVIRONMENT: "staging",
         {%- endif %}
-        {%- if features contains "contact-form" %}
-        PUBLIC_RECAPTCHA_SITE_KEY: "",
+        {%- if contactForm %}
+        PUBLIC_RECAPTCHA_SITE_KEY: "{{contactForm.recaptchaSiteKey}}",
         {%- endif %}
     },
+    {%- if contactForm %}
+    contactForm: {
+        siteName: "{{project.title}}",
+        recipients: [{% for recipient in contactForm.recipients %}"{{recipient}}"{% unless forloop.last %}, {% endunless %}{% endfor %}],
+        senderAddress: "{{contactForm.senderAddress}}",
+        timeZone: "{{contactForm.timeZone}}",
+        alarmEmail: {% if contactForm.alarmEmail %}"{{contactForm.alarmEmail}}"{% else %}null{% endif %},
+        recaptchaSecretName: "{{contactForm.recaptchaSecretName}}",
+        {%- if sentry %}
+        sentryDsn: "{{sentry.dsn}}",
+        sentryEnvironment: "staging",
+        {%- endif %}
+    },
+    {%- endif %}
 });
 
 app.synth();

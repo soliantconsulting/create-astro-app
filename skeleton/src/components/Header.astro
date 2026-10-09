@@ -1,0 +1,132 @@
+---
+import { navRoutes } from "../seo/routes.js";
+import { siteName } from "../site.js";
+
+type Props = {
+    currentPath: string;
+};
+
+const { currentPath } = Astro.props;
+const nav = navRoutes();
+---
+
+<header class="site-header">
+    <div class="container site-header__inner">
+        <a href="/" class="site-header__brand">{siteName}</a>
+        <button
+            type="button"
+            class="site-header__toggle"
+            aria-expanded="false"
+            aria-controls="primary-nav"
+            data-nav-toggle
+        >
+            Menu
+        </button>
+        <nav id="primary-nav" aria-label="Primary" class="site-header__nav" data-nav>
+            <ul>
+                {
+                    nav.map((item) => (
+                        <li>
+                            <a
+                                href={item.path}
+                                aria-current={item.path === currentPath ? "page" : undefined}
+                            >
+                                {item.navLabel}
+                            </a>
+                        </li>
+                    ))
+                }
+            </ul>
+        </nav>
+    </div>
+</header>
+
+<script>
+    const toggle = document.querySelector<HTMLButtonElement>("[data-nav-toggle]");
+    const nav = document.querySelector<HTMLElement>("[data-nav]");
+
+    if (toggle !== null && nav !== null) {
+        toggle.addEventListener("click", () => {
+            const isOpen = nav.classList.toggle("is-open");
+            toggle.setAttribute("aria-expanded", String(isOpen));
+        });
+    }
+</script>
+
+<style>
+    .site-header {
+        border-bottom: 1px solid var(--color-surface-alt);
+        background: var(--color-surface);
+    }
+
+    .site-header__inner {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        padding-block: 1rem;
+    }
+
+    .site-header__brand {
+        font-weight: 700;
+        font-size: 1.25rem;
+        color: var(--color-ink);
+        text-decoration: none;
+    }
+
+    .site-header__toggle {
+        font: inherit;
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--color-border);
+        border-radius: var(--size-radius);
+        background: var(--color-surface);
+        color: var(--color-ink);
+    }
+
+    .site-header__nav {
+        display: none;
+        width: 100%;
+    }
+
+    .site-header__nav.is-open {
+        display: block;
+    }
+
+    .site-header__nav ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .site-header__nav a {
+        display: block;
+        padding: 0.5rem 0;
+        color: var(--color-ink);
+        text-decoration: none;
+    }
+
+    .site-header__nav a[aria-current="page"] {
+        color: var(--color-brand);
+        font-weight: 700;
+    }
+
+    @media (min-width: 64em) {
+        .site-header__toggle {
+            display: none;
+        }
+
+        .site-header__nav {
+            display: block;
+            width: auto;
+        }
+
+        .site-header__nav ul {
+            flex-direction: row;
+            gap: 1.5rem;
+        }
+    }
+</style>

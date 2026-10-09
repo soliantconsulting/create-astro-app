@@ -1,6 +1,8 @@
 # {{project.title}}
 
-Static site built with Astro and Tailwind CSS, deployed to S3 and CloudFront.
+Static site built with Astro, deployed to S3 and CloudFront. Pages and components are `.astro`
+files that ship no JavaScript by default; React islands with MUI are available for the parts of a
+page that need to be interactive.
 
 ## Local development
 
@@ -8,6 +10,18 @@ Static site built with Astro and Tailwind CSS, deployed to S3 and CloudFront.
 pnpm install
 pnpm dev
 ```
+{%- if contactForm %}
+
+The contact form posts to `/api/contact`. To exercise it locally, run the intake next to Astro in a
+second terminal; Astro proxies `/api` to it and the email it would send is printed:
+
+```
+pnpm dev:contact
+```
+
+reCAPTCHA is skipped locally unless you export `PUBLIC_RECAPTCHA_SITE_KEY` and
+`RECAPTCHA_SECRET_KEY` for a key that lists `localhost` as an allowed domain.
+{%- endif %}
 
 ## Build
 
@@ -15,48 +29,127 @@ pnpm dev
 pnpm build
 ```
 
-`pnpm build` runs `astro build` and then `scripts/seo-check.ts`. The check is part of the build,
-not a separate step, so a failure aborts before the CDK bundling step can pick up the output.
+`pnpm build` runs `astro build` and then `scripts/seo-check.ts`. A failed check aborts the build,
+so nothing is deployed.
 
 ## How this site is structured
 
 **`src/seo/routes.ts` is the single source of truth for every URL.** Titles, meta descriptions,
-the primary navigation and the sitemap all read from it. A page declares which route it is and
-`BaseLayout` supplies the rest. There is deliberately no `title` prop, because the failure this
-prevents is a site shipping hundreds of pages that all carry the same template-default title.
+the primary navigation and the sitemap all read from it. A page passes its path to `Layout` and
+the registry supplies the rest; there is no `title` prop. A page whose path is not registered
+fails the build.
 
-Adding a page means adding it to that array. A page whose path is not registered throws at build.
+**`src/theme/tokens.ts` holds every color, font and size.** `Layout` emits them as CSS custom
+properties (`--color-brand`, `--size-radius`, ...), and stylesheets use those. A React island that
+needs an MUI theme builds it from the same object:
 
-**`src/styles/global.css` is the single styling source.** The `@theme` block closes the palette
-and the breakpoint set with `--color-*: initial` and `--breakpoint-*: initial`, so a colour or
-breakpoint that is not defined there does not exist. Element defaults (type scale, link colour,
-focus ring, reduced motion) live in `@layer base`, which is why no heading, paragraph or link in
-this site carries a class.
+```tsx
+import { createTheme } from "@mui/material/styles";
+import { tokens } from "../theme/tokens.js";
 
-**Arbitrary Tailwind values are not allowed in `src/pages`.** `p-[13px]` belongs in a component or
-in the `@theme` block, so a one-off measurement is defined once for the whole site instead of
-being typed into a template. The build fails otherwise.
+export const theme = createTheme({
+    palette: { primary: { main: tokens.color.brand }, text: { primary: tokens.color.ink } },
+    typography: { fontFamily: tokens.font.sans },
+});
+```
+
+Islands live in `src/components/*.tsx` and need a `client:*` directive where they are used, for
+example `<SearchBox client:visible />`. Prefer `.astro` for anything that does not need to react
+to input after the page loads.
+
+**`src/styles/global.css` holds element defaults** (type scale, links, focus ring, reduced motion)
+and a few layout classes. Components style themselves in scoped `<style>` blocks.
 
 ## What the build asserts
 
 `scripts/seo-check.ts` fails the build on any of the following:
 
-- a page with no title, or a title still carrying scaffold text
+- a page with no title, or a title or description still carrying scaffold text
 - two pages sharing a title or a meta description
-- a missing or foreign-origin canonical link
-- a page whose `<h1>` is empty in the static HTML, meaning a crawler never sees the heading
-- a sitemap whose URL count disagrees with the registry
+- a missing canonical link, or one that is not on the environment's site URL
+- a page whose `<h1>` is empty in the static HTML
+- a sitemap whose URL count disagrees with the registry, or a registry entry with no page
 - a 404 page missing its heading or its noindex tag
-- a class with no matching rule in the emitted CSS, which is what an off-palette typo produces
-- a full-width button that never returns to auto width at a larger breakpoint
-- an arbitrary Tailwind value inside `src/pages`
+- a `robots.txt` that lets crawlers into a non-production build, or blocks them in production
 - emitted CSS over the size budget
+- a color literal anywhere in `src` outside `src/theme/tokens.ts`
+{%- if contactForm %}
+
+## Contact form
+
+`src/forms/contact-forms.ts` defines each form: its fields, the email subject and the page a
+visitor lands on afterwards. `<ContactForm formId="contact" />` renders one, and the intake Lambda
+validates submissions against the same definition. To add a form, add an entry and render it.
+
+How a submission travels:
+
+1. The browser posts to `/api/contact`. CloudFront routes `/api/*` to an API Gateway HTTP API,
+   throttled to 5 requests a second.
+2. The intake Lambda (`functions/contact-form/intake.ts`) drops honeypot hits, validates the
+   fields, quarantines anything submitted within 3 seconds of page load, then verifies the
+   reCAPTCHA v3 token (action, hostname and a 0.5 minimum score).
+3. A submission that fails a spam check is written to the quarantine bucket (kept 30 days) and
+   answered exactly like a success, so the endpoint cannot be probed. Anything that passes is put
+   on an SQS queue.
+4. The worker Lambda emails it through SES from `{{contactForm.senderAddress}}` to the
+   recipients in `cdk/src/env-*.ts`, with the visitor's address as Reply-To. Throttling and
+   network failures retry; after 5 attempts the message moves to a dead letter queue kept for
+   14 days.
+
+If Google cannot be reached, or no reCAPTCHA secret is configured, the submission is still
+delivered, with `[Spam check unavailable]` or `[Spam check not configured]` at the start of the
+subject. A visitor without JavaScript cannot get a reCAPTCHA token and is asked to enable it.
+
+### Alarms
+
+An SNS topic emails {% if contactForm.alarmEmail %}`{{contactForm.alarmEmail}}`{% else %}nobody yet; subscribe an address in `cdk/src/env-*.ts`{% endif %} when:
+
+- a message is in the dead letter queue
+- the intake or the worker logs an error
+- the intake function fails to run
+
+SNS sends a confirmation email to a new subscriber first; the alarms are silent until it is clicked.
+
+### Email setup (SES)
+
+The scaffolding CLI created a domain identity for the staging sender and published its DKIM
+records and a monitoring-only DMARC record. Check that the identity shows as verified in the SES
+console before testing the form.
+
+While the AWS account is in the SES sandbox, SES delivers only to verified addresses. The CLI
+requested verification for each recipient; each one has to click the link SES emailed. Request
+production access in the SES console before launch.
+
+### reCAPTCHA keys
+
+Create a reCAPTCHA v3 key per environment, each listing only that environment's domain, so the
+hostname check means something. The site key is public and goes in `PUBLIC_RECAPTCHA_SITE_KEY` in
+`cdk/src/env-*.ts`. The secret key goes in Secrets Manager under the name in that file, never in
+the repository:
+
+```
+aws secretsmanager create-secret --name {{contactForm.recaptchaSecretName}} --secret-string <secret key>
+```
+
+The intake re-reads the secret every 5 minutes, so adding or rotating it needs no deploy.
+
+### Quarantined submissions
+
+```
+aws s3 ls s3://<QuarantineBucketName output>/quarantine/ --recursive
+```
+
+Each object records the form, the reason it was held and the submitted values.
+{%- endif %}
 
 ## Deployment
 
 Bitbucket Pipelines deploys staging automatically on `main` and production on a manual trigger.
+Staging answers every request with `X-Robots-Tag: noindex, nofollow` and its `robots.txt` blocks
+crawlers; production allows both.
+{%- if stagingDomain %}
 
-{% if stagingDomain %}Point the staging domain after the first successful deploy:
+Point the staging domain after the first successful deploy:
 
 ```
 pnpx @soliantconsulting/sld-dns-control-client point-staging-domain
@@ -64,18 +157,20 @@ pnpx @soliantconsulting/sld-dns-control-client point-staging-domain
 
 That command finds the stack output whose key ends with `DistributionDomainName`. Do not rename
 that output.
-{% endif %}
+{%- endif %}
 
-Production needs `certificateArn` and `domainName` filled in at `cdk/src/env-production.ts`.
+Before the first production deploy, replace every `CHANGE-ME` in `cdk/src/env-production.ts`:
+the certificate and domain{% if contactForm %}, a sender address on a domain verified in SES (its DKIM
+records go in the client's DNS), and the production reCAPTCHA site key; then store the production
+secret key as described above{% endif %}.
 
-### What the CloudFront stack does differently from the React SPA starter
+### What the CloudFront stack does
 
-- An unknown URL returns a real **404** carrying `/404.html`, rather than the homepage at HTTP 200.
-  403 is mapped the same way, because S3 behind Origin Access Control answers a missing key with
-  AccessDenied rather than NoSuchKey.
-- A viewer-request function resolves directory URLs (`/about/` to `/about/index.html`), which S3
-  does not do on its own.
-- Only hashed assets under `/_astro/` are marked immutable. Documents revalidate.
-- Retired pages are **pruned** from the bucket, so a page removed from the site stops being served.
-  The build refuses to hand over an empty or partial output, which is what makes pruning safe.
-- Each deploy issues exactly one `/*` invalidation rather than one per file.
+- An unknown URL returns a real **404** carrying `/404.html`, never the homepage at HTTP 200. 403
+  is mapped the same way, because S3 behind Origin Access Control answers a missing key with
+  AccessDenied.
+- A viewer-request function resolves directory URLs (`/about/` to `/about/index.html`).
+- Only hashed assets under `/_astro/` are cached as immutable. Documents revalidate.
+- Pages removed from the site are **pruned** from the bucket. The build refuses to hand over an
+  empty or partial output, which is what makes pruning safe.
+- Each deploy issues one `/*` invalidation rather than one per file.

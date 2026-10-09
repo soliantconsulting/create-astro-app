@@ -1,91 +1,12 @@
 ---
-import Honeypot from "../components/Honeypot.astro";
-import BaseLayout from "../layouts/BaseLayout.astro";
-import { contactFields } from "../forms/contact.js";
-
-/*
- * A native form with real name attributes, posting to the serverless handler.
- *
- * Deliberately not an interactive island. A form like this works with JavaScript disabled, and
- * hydrating a framework to reproduce markup the browser already understands would put the only
- * JavaScript on the page in the way of the one thing a visitor came to do.
- */
-const recaptchaSiteKey = import.meta.env.PUBLIC_RECAPTCHA_SITE_KEY;
+import ContactForm from "../components/ContactForm.astro";
+import Layout from "../layouts/Layout.astro";
 ---
 
-<BaseLayout path="/contact/">
-    <section class="mx-auto max-w-2xl px-4 py-12">
+<Layout path="/contact/">
+    <section class="container section">
         <h1>Contact</h1>
-
-        <form method="post" action="/api/contact" class="mt-8 flex flex-col gap-5">
-            <input type="hidden" name="subject" value="Website contact" />
-            <input type="hidden" name="recaptchaToken" id="recaptcha-token" value="" />
-
-            {
-                contactFields.map((field) => (
-                    <div class="flex flex-col gap-1">
-                        <label for={field.name} class="font-semibold">
-                            {field.label}
-                            {field.required && <span aria-hidden="true"> *</span>}
-                        </label>
-                        {field.type === "textarea" ? (
-                            <textarea
-                                id={field.name}
-                                name={field.name}
-                                rows="6"
-                                required={field.required}
-                                autocomplete={field.autocomplete}
-                                class="border border-border px-3 py-2"
-                            />
-                        ) : (
-                            <input
-                                id={field.name}
-                                name={field.name}
-                                type={field.type}
-                                required={field.required}
-                                autocomplete={field.autocomplete}
-                                class="border border-border px-3 py-2"
-                            />
-                        )}
-                    </div>
-                ))
-            }
-
-            <Honeypot />
-
-            <input type="hidden" name="renderedAt" value={Date.now().toString()} />
-
-            <div>
-                <button
-                    type="submit"
-                    class="inline-flex w-full items-center justify-center bg-brand px-5 py-3 font-semibold text-surface hover:bg-brand-dark sm:w-auto"
-                >
-                    Send
-                </button>
-            </div>
-        </form>
+        <p class="reading-width">Send us a message and we will get back to you.</p>
+        <ContactForm formId="contact" />
     </section>
-
-    {
-        recaptchaSiteKey && (
-            <Fragment>
-                <script is:inline src={`https://www.google.com/recaptcha/api.js?render=${recaptchaSiteKey}`} defer />
-                <script is:inline define:vars={{ recaptchaSiteKey }}>
-                    {`
-                    window.addEventListener("load", function () {
-                        if (!window.grecaptcha) { return; }
-                        window.grecaptcha.ready(function () {
-                            window.grecaptcha
-                                .execute(recaptchaSiteKey, { action: "contact" })
-                                .then(function (token) {
-                                    var field = document.getElementById("recaptcha-token");
-                                    if (field) { field.value = token; }
-                                });
-                        });
-                    });
-                    `}
-                </script>
-            </Fragment>
-        )
-    }
-</BaseLayout>
+</Layout>

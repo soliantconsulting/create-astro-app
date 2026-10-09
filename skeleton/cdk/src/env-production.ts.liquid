@@ -3,22 +3,38 @@ import { AppStack } from "./app-stack.js";
 
 const app = new App();
 
+// Production is deployed by hand from the pipeline. Fill in every CHANGE-ME first; the README
+// lists what each one needs (certificate, sender domain verified in SES, reCAPTCHA keys).
 new AppStack(app, "{{project.name}}-production", {
     env: {
         account: "{{awsEnv.accountId}}",
         region: "{{awsEnv.region}}",
     },
-    // Fill both in once the production certificate is issued and the domain is confirmed.
     certificateArn: "CHANGE-ME",
     domainName: "CHANGE-ME",
+    allowIndexing: true,
     buildEnv: {
         {%- if sentry %}
         SENTRY_ENVIRONMENT: "production",
         {%- endif %}
-        {%- if features contains "contact-form" %}
-        PUBLIC_RECAPTCHA_SITE_KEY: "",
+        {%- if contactForm %}
+        PUBLIC_RECAPTCHA_SITE_KEY: "CHANGE-ME",
         {%- endif %}
     },
+    {%- if contactForm %}
+    contactForm: {
+        siteName: "{{project.title}}",
+        recipients: [{% for recipient in contactForm.recipients %}"{{recipient}}"{% unless forloop.last %}, {% endunless %}{% endfor %}],
+        senderAddress: "CHANGE-ME",
+        timeZone: "{{contactForm.timeZone}}",
+        alarmEmail: {% if contactForm.alarmEmail %}"{{contactForm.alarmEmail}}"{% else %}null{% endif %},
+        recaptchaSecretName: "{{project.name}}/production/recaptcha-secret-key",
+        {%- if sentry %}
+        sentryDsn: "{{sentry.dsn}}",
+        sentryEnvironment: "production",
+        {%- endif %}
+    },
+    {%- endif %}
 });
 
 app.synth();

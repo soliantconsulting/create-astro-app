@@ -2,31 +2,57 @@ import { execSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { AssetHashType, CfnOutput, Duration, DockerImage, RemovalPolicy, Size, Stack, type StackProps } from "aws-cdk-lib";
+import {
+    AssetHashType,
+    CfnOutput,
+    DockerImage,
+    Duration,
+    RemovalPolicy,
+    Size,
+    Stack,
+    type StackProps,
+} from "aws-cdk-lib";
 import { Certificate } from "aws-cdk-lib/aws-certificatemanager";
 import {
+    {%- if contactForm %}
+    AllowedMethods,
+    {%- endif %}
     CachePolicy,
     Distribution,
     Function as CloudFrontFunction,
     FunctionCode,
     FunctionEventType,
+    HeadersFrameOption,
+    HeadersReferrerPolicy,
     HttpVersion,
+    {%- if contactForm %}
+    OriginRequestPolicy,
+    {%- endif %}
+    type ResponseCustomHeader,
     ResponseHeadersPolicy,
     ViewerProtocolPolicy,
 } from "aws-cdk-lib/aws-cloudfront";
-import { S3BucketOrigin } from "aws-cdk-lib/aws-cloudfront-origins";
+import { {% if contactForm %}HttpOrigin, {% endif %}S3BucketOrigin } from "aws-cdk-lib/aws-cloudfront-origins";
 import { LogGroup, RetentionDays } from "aws-cdk-lib/aws-logs";
 import { BlockPublicAccess, Bucket } from "aws-cdk-lib/aws-s3";
 import { BucketDeployment, CacheControl, Source } from "aws-cdk-lib/aws-s3-deployment";
 import type { Construct } from "constructs";
 import { copySync } from "fs-extra/esm";
+{%- if contactForm %}
+import { ContactForm, type ContactFormProps } from "./contact-form.js";
+{%- endif %}
 
 type BuildEnv = Record<string, string>;
 
 type AppStackProps = StackProps & {
     certificateArn: string;
     domainName: string;
+    /** Only production may be crawled. Every other environment answers with X-Robots-Tag: noindex. */
+    allowIndexing: boolean;
     buildEnv: BuildEnv;
+    {%- if contactForm %}
+    contactForm: Omit<ContactFormProps, "hostnames">;
+    {%- endif %}
 };
 
 export class AppStack extends Stack {
@@ -45,12 +71,8 @@ export class AppStack extends Stack {
             props.certificateArn,
         );
 
-        /*
-         * Astro is built with `format: "directory"`, so /about/ is stored as /about/index.html.
-         * S3 behind Origin Access Control does no directory-index resolution, so without this
-         * function every clean URL 404s. Appending index.html at the viewer edge is cheaper than
-         * a Lambda@Edge and runs on every request for well under a millisecond.
-         */
+        // Astro builds /about/ as /about/index.html, and S3 behind Origin Access Control does no
+        // directory-index resolution, so clean URLs are mapped to their index.html at the edge.
         const directoryIndex = new CloudFrontFunction(this, "DirectoryIndex", {
             code: FunctionCode.fromInline(`
 function handler(event) {
@@ -68,15 +90,26 @@ function handler(event) {
 `),
         });
 
-        /*
-         * Hashed assets are the only thing safe to mark immutable. Astro emits them under
-         * /_astro/ with a content hash in the filename, so a changed file is a changed URL.
-         * Everything else is regenerated on every build and must revalidate.
-         *
-         * The header the browser sees is set here, per cache behavior, rather than as S3 object
-         * metadata. That keeps object metadata uniform, which in turn allows a single
-         * BucketDeployment, which is what makes `prune` safe below.
-         */
+        const robotsHeaders: ResponseCustomHeader[] = props.allowIndexing
+            ? []
+            : [{ header: "X-Robots-Tag", value: "noindex, nofollow", override: true }];
+
+        const securityHeaders = {
+            strictTransportSecurity: {
+                accessControlMaxAge: Duration.days(365),
+                includeSubdomains: true,
+                override: true,
+            },
+            contentTypeOptions: { override: true },
+            frameOptions: { frameOption: HeadersFrameOption.DENY, override: true },
+            referrerPolicy: {
+                referrerPolicy: HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN,
+                override: true,
+            },
+        };
+
+        // Only files under /_astro/ carry a content hash in their name, so only they may be cached
+        // as immutable. Everything else is regenerated on every build and must revalidate.
         const immutableAssetHeaders = new ResponseHeadersPolicy(this, "ImmutableAssetHeaders", {
             customHeadersBehavior: {
                 customHeaders: [
@@ -85,15 +118,10 @@ function handler(event) {
                         value: "public, max-age=31536000, immutable",
                         override: true,
                     },
+                    ...robotsHeaders,
                 ],
             },
-            securityHeadersBehavior: {
-                strictTransportSecurity: {
-                    accessControlMaxAge: Duration.days(365),
-                    includeSubdomains: true,
-                    override: true,
-                },
-            },
+            securityHeadersBehavior: securityHeaders,
         });
 
         const documentHeaders = new ResponseHeadersPolicy(this, "DocumentHeaders", {
@@ -104,24 +132,20 @@ function handler(event) {
                         value: "public, max-age=0, must-revalidate",
                         override: true,
                     },
+                    ...robotsHeaders,
                 ],
             },
-            securityHeadersBehavior: {
-                strictTransportSecurity: {
-                    accessControlMaxAge: Duration.days(365),
-                    includeSubdomains: true,
-                    override: true,
-                },
-                contentTypeOptions: { override: true },
-                frameOptions: { frameOption: "DENY", override: true } as never,
-                referrerPolicy: {
-                    referrerPolicy: "strict-origin-when-cross-origin",
-                    override: true,
-                } as never,
-            },
+            securityHeadersBehavior: securityHeaders,
         });
 
         const origin = S3BucketOrigin.withOriginAccessControl(websiteBucket);
+        {%- if contactForm %}
+
+        const contactForm = new ContactForm(this, "ContactForm", {
+            ...props.contactForm,
+            hostnames: [props.domainName],
+        });
+        {%- endif %}
 
         const distribution = new Distribution(this, "Distribution", {
             certificate,
@@ -145,18 +169,21 @@ function handler(event) {
                     responseHeadersPolicy: immutableAssetHeaders,
                     viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 },
+                {%- if contactForm %}
+                "/api/*": {
+                    origin: new HttpOrigin(contactForm.apiDomainName),
+                    allowedMethods: AllowedMethods.ALLOW_ALL,
+                    cachePolicy: CachePolicy.CACHING_DISABLED,
+                    originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+                    viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                },
+                {%- endif %}
             },
             defaultRootObject: "index.html",
             httpVersion: HttpVersion.HTTP2_AND_3,
-            /*
-             * A missing page returns a real 404 carrying the styled 404 document.
-             *
-             * The SPA starter maps both 404 and 403 to /index.html at HTTP 200. On a multi-page
-             * site that is a soft-404 machine: every dead URL answers "200 OK" with the homepage,
-             * so crawlers index unlimited duplicate homepages and monitoring reports the site as
-             * healthy. 403 is included because S3 with Origin Access Control answers a missing
-             * key with AccessDenied, not NoSuchKey.
-             */
+            // A missing page returns a real 404 with the styled 404 document, never the homepage
+            // at HTTP 200. 403 is included because S3 behind Origin Access Control answers a
+            // missing key with AccessDenied.
             errorResponses: [
                 {
                     httpStatus: 404,
@@ -173,9 +200,15 @@ function handler(event) {
             ],
         });
 
-        // sld-dns-control resolves the CNAME target by finding a stack output whose key ends with
-        // this exact name. Renaming it silently breaks `point-staging-domain`.
+        // sld-dns-control finds the CNAME target by a stack output whose key ends with this exact
+        // name. Renaming it breaks `point-staging-domain`.
         new CfnOutput(this, "DistributionDomainName", { value: distribution.domainName });
+
+        const buildEnv: BuildEnv = {
+            ...props.buildEnv,
+            PUBLIC_SITE_URL: `https://${props.domainName}`,
+            PUBLIC_ALLOW_INDEXING: String(props.allowIndexing),
+        };
 
         const sourcePath = fileURLToPath(new URL("../../", import.meta.url));
         const source = Source.asset(sourcePath, {
@@ -188,36 +221,25 @@ function handler(event) {
                         execSync("pnpm build", {
                             stdio: ["ignore", process.stderr, process.stdout],
                             cwd: sourcePath,
-                            env: {
-                                ...process.env,
-                                ...props.buildEnv,
-                            },
+                            env: { ...process.env, ...buildEnv },
                         });
 
                         const distPath = path.join(sourcePath, "dist");
 
-                        /*
-                         * Assert the build actually produced a site before anything is synced.
-                         *
-                         * This guard and `prune` below ship together and must never be separated.
-                         * Pruning means the sync deletes whatever is in the bucket and not in this
-                         * directory, so a build that fails quietly and leaves an empty output
-                         * would delete the live site. Throwing here is deliberate: returning false
-                         * would fall through to the Docker path and report a confusing error.
-                         */
+                        // Never hand an empty or partial build to the deployment below: it prunes,
+                        // so whatever is missing here is deleted from the live site. Throwing
+                        // rather than returning false keeps CDK from falling back to Docker.
                         if (!existsSync(distPath)) {
                             throw new Error("Build produced no dist directory.");
                         }
 
                         if (!existsSync(path.join(distPath, "404.html"))) {
                             throw new Error(
-                                "Build produced no 404.html. The distribution serves it for every unknown URL, so deploying without it would return an empty body on 404.",
+                                "Build produced no 404.html, which the distribution serves for every unknown URL.",
                             );
                         }
 
-                        const entries = readdirSync(distPath);
-
-                        if (!entries.includes("index.html")) {
+                        if (!readdirSync(distPath).includes("index.html")) {
                             throw new Error("Build produced no index.html at the root of dist.");
                         }
 
@@ -226,14 +248,10 @@ function handler(event) {
                         return true;
                     },
                 },
-                environment: props.buildEnv,
+                environment: buildEnv,
             },
-            /*
-             * OUTPUT rather than SOURCE because the source directory includes the whole project.
-             * The cost is that any content change re-uploads the bundle to the CDK staging bucket;
-             * the S3 sync itself is still incremental, so only changed objects reach the website
-             * bucket.
-             */
+            // OUTPUT because the source directory is the whole project. Only changed objects reach
+            // the website bucket, since the sync itself is incremental.
             assetHashType: AssetHashType.OUTPUT,
         });
 
@@ -244,27 +262,18 @@ function handler(event) {
         new BucketDeployment(this, "BucketDeployment", {
             destinationBucket: websiteBucket,
             logGroup: deploymentLogGroup,
-            /*
-             * Retired pages are deleted rather than left to be served forever. The SPA starter
-             * sets this to false, which is why a page removed from a site keeps answering 200
-             * indefinitely.
-             *
-             * Safe only because tryBundle above refuses to hand over an empty or partial build.
-             */
+            // Deletes pages that were removed from the site. Safe only because tryBundle refuses
+            // to hand over an empty or partial build.
             prune: true,
             cacheControl: [CacheControl.fromString("public, max-age=0, must-revalidate")],
             sources: [source],
-            /*
-             * One invalidation of /* per deploy. Per-file invalidation looks cheaper and is not:
-             * the first 1,000 paths a month are free and every path after that is billed, so a
-             * catalog-sized site invalidating per file runs to real money per deploy.
-             */
+            // One invalidation of /* per deploy. Per-path invalidation is billed past the first
+            // 1,000 paths a month, which a large site reaches in a single deploy.
             distribution,
             distributionPaths: ["/*"],
-            // The pipeline does not need to sit and watch the invalidation finish.
             waitForDistributionInvalidation: false,
             memoryLimit: 1024,
-            // The deployment Lambda unzips the whole site into /tmp. 512 MiB is not enough once a
+            // The deployment Lambda unzips the whole site into /tmp; 512 MiB is not enough once a
             // site has real images.
             ephemeralStorageSize: Size.gibibytes(2),
         });

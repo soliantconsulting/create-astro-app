@@ -1,9 +1,4 @@
 ---
-/**
- * Variants are looked up in a map, never built by interpolating a string. Tailwind scans source
- * text for complete class names, so `bg-${variant}` compiles to nothing and fails silently. That
- * is the single most common way a Tailwind codebase ships an unstyled control.
- */
 type Variant = "primary" | "secondary";
 
 type Props = {
@@ -13,21 +8,46 @@ type Props = {
 };
 
 const { href, variant = "primary", external = false } = Astro.props;
-
-const base =
-    "inline-flex w-full items-center justify-center px-5 py-3 font-semibold no-underline sm:w-auto";
-
-const variants: Record<Variant, string> = {
-    primary: "bg-brand text-surface hover:bg-brand-dark",
-    secondary: "border border-brand bg-surface text-brand hover:bg-surface-alt",
-};
 ---
 
 <a
     href={href}
-    class={`${base} ${variants[variant]}`}
+    class:list={["button", `button--${variant}`]}
     {...external ? { target: "_blank", rel: "noopener noreferrer" } : {}}
 >
     <slot />
     {external && <span class="sr-only">(opens in a new tab)</span>}
 </a>
+
+<style>
+    .button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.75rem 1.25rem;
+        border: 2px solid var(--color-brand);
+        border-radius: var(--size-radius);
+        font-weight: 600;
+        text-decoration: none;
+    }
+
+    .button--primary {
+        background: var(--color-brand);
+        color: var(--color-surface);
+    }
+
+    .button--primary:hover {
+        background: var(--color-brand-dark);
+        border-color: var(--color-brand-dark);
+        color: var(--color-surface);
+    }
+
+    .button--secondary {
+        background: var(--color-surface);
+        color: var(--color-brand);
+    }
+
+    .button--secondary:hover {
+        background: var(--color-surface-alt);
+    }
+</style>

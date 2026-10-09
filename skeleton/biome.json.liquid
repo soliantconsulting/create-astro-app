@@ -1,11 +1,6 @@
 {
     "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
     "assist": { "actions": { "source": { "organizeImports": "on" } } },
-    "css": {
-        "parser": {
-            "tailwindDirectives": true
-        }
-    },
     "files": {
         "includes": [
             "biome.json",
@@ -13,6 +8,11 @@
             "astro.config.mjs",
             "scripts/**/*",
             "src/**/*",
+            {%- if contactForm %}
+            "functions/**/*",
+            "test/**/*",
+            {%- endif %}
+            "cdk/src/**/*",
             "!cdk/cdk.out",
             "!src/assets",
             "!.astro"

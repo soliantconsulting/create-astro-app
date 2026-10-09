@@ -11,6 +11,7 @@ import {
     createSentryTask,
     runPipeline,
 } from "@soliantconsulting/starter-lib";
+import { contactFormTask } from "./tasks/contact-form.js";
 import { featuresTask } from "./tasks/features.js";
 import { sentryVariableTask } from "./tasks/sentry-variable.js";
 import { stagingDomainTask } from "./tasks/staging-domain.js";
@@ -29,6 +30,7 @@ await runPipeline({
         createSentryTask({ projectPlatform: "javascript-astro" }),
         sentryVariableTask,
         featuresTask,
+        contactFormTask,
         synthTask,
         createGitTask(),
     ],

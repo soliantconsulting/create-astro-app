@@ -17,7 +17,7 @@
     "create-astro-app": "./dist/cli.js"
   },
   "scripts": {
-    "test-synth": "rm -rf ./test-synth && tsx ./src/test-cli.ts test-synth",
+    "test-synth": "rm -rf ./test-synth && tsx ./src/test-cli.ts full && tsx ./src/test-cli.ts minimal",
     "build": "tsc",
     "format": "biome format . --write",
     "check": "biome check . --write"
@@ -34,6 +34,8 @@
   },
   "dependencies": {
     "@aws-sdk/client-acm": "^3.1101.0",
+    "@aws-sdk/client-secrets-manager": "^3.1148.0",
+    "@aws-sdk/client-sesv2": "^3.1148.0",
     "@listr2/prompt-adapter-enquirer": "^4.3.0",
     "@soliantconsulting/sld-dns-control-client": "^1.0.0",
     "@soliantconsulting/starter-lib": "^3.0.0",

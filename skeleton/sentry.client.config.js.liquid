@@ -1,16 +1,7 @@
 import * as Sentry from "@sentry/astro";
 
-/*
- * Browser-side error reporting.
- *
- * Worth knowing what this costs on a static marketing site: the pages this starter produces ship
- * zero JavaScript by default, so the Sentry browser SDK is typically the only script on the page.
- * If a site has no interactive islands, consider declining the Sentry prompt at scaffold time and
- * relying on CloudFront and pipeline logs instead. Where a site does have islands (a form, a
- * search box), this earns its place.
- *
- * Tracing is off. Turn it on deliberately, per site, with a measured sample rate.
- */
+// Pages ship no JavaScript by default, so on a site without islands this SDK is the only script
+// a visitor downloads. Tracing is off; turn it on per site with a measured sample rate.
 Sentry.init({
     dsn: "{{sentry.dsn}}",
     environment: import.meta.env.SENTRY_ENVIRONMENT ?? import.meta.env.MODE,

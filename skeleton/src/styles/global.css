@@ -1,114 +1,135 @@
 /*
- * The single styling source for this site.
+ * Element defaults and the few layout primitives every page shares.
  *
- * source() bounds the class scan to the source tree. Without it Tailwind walks the whole project
- * directory, which is fine at 15 pages and expensive at 15,000. The path is resolved relative to
- * this file, so "../" means src/, not the project root.
- */
-@import "tailwindcss" source("../");
-
-/*
- * Closing the palette and the breakpoint set.
+ * Colors, fonts and sizes come from the custom properties that src/theme/tokens.ts emits on :root.
+ * Components style themselves in their own scoped <style> blocks.
  *
- * `--color-*: initial` and `--breakpoint-*: initial` delete Tailwind's defaults, so `bg-teal-400`
- * and `lg:` stop existing unless this file defines them. That turns a typo or an off-palette
- * colour from something that silently ships into a class with no rule, which assertion A17 in
- * scripts/seo-check.ts then fails the build on.
+ * Breakpoints (media queries cannot read custom properties):
+ *   36em  phones end, buttons stop stacking
+ *   48em  tablets
+ *   64em  desktop navigation
  */
-@theme {
-    --color-*: initial;
-    --breakpoint-*: initial;
 
-    /* Replace every value below with tokens taken from the design being implemented. */
-    --color-brand: #0e82b2;
-    --color-brand-dark: #073c5e;
-    --color-ink: #333333;
-    --color-ink-muted: #666666;
-    --color-surface: #ffffff;
-    --color-surface-alt: #f4f4f4;
-    --color-border: #d8d8d8;
-    --color-focus: #0b6d95;
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
 
-    --breakpoint-sm: 550px;
-    --breakpoint-md: 768px;
-    --breakpoint-lg: 992px;
-    --breakpoint-xl: 1200px;
+html {
+    font-family: var(--font-sans);
+    color: var(--color-ink);
+    background-color: var(--color-surface);
+    line-height: 1.6;
+    -webkit-text-size-adjust: 100%;
+}
 
-    --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
 
-    --text-base: 1rem;
-    --text-base--line-height: 1.6;
+main {
+    flex: 1;
+}
+
+h1,
+h2,
+h3 {
+    line-height: 1.25;
+    margin: 0 0 0.75rem;
+}
+
+h1 {
+    font-size: clamp(1.75rem, 1.4rem + 1.5vw, 2.5rem);
+}
+
+h2 {
+    font-size: clamp(1.4rem, 1.2rem + 0.8vw, 1.875rem);
+}
+
+h3 {
+    font-size: 1.25rem;
+}
+
+p {
+    margin: 0 0 1rem;
+}
+
+a {
+    color: var(--color-brand);
+}
+
+a:hover {
+    color: var(--color-brand-dark);
+}
+
+img {
+    max-width: 100%;
+    height: auto;
 }
 
 /*
- * Element defaults live here, not in classes.
- *
- * A heading, paragraph or link carries no class anywhere in this site. That is what keeps the
- * class attributes in pages down to layout only, and it means a type-scale change is an edit to
- * this file rather than a find and replace across every template.
+ * A visible focus ring on every interactive element. Component styles must not remove it.
  */
-@layer base {
-    html {
-        font-family: var(--font-sans);
-        color: var(--color-ink);
-        background-color: var(--color-surface);
-        -webkit-text-size-adjust: 100%;
-    }
+:focus-visible {
+    outline: 3px solid var(--color-focus);
+    outline-offset: 2px;
+}
 
-    h1 {
-        font-size: 2rem;
-        line-height: 1.2;
-        font-weight: 700;
-    }
+.container {
+    width: 100%;
+    max-width: var(--size-content-width);
+    margin-inline: auto;
+    padding-inline: 1rem;
+}
 
-    h2 {
-        font-size: 1.5rem;
-        line-height: 1.3;
-        font-weight: 700;
-    }
+.section {
+    padding-block: 3rem;
+}
 
-    h3 {
-        font-size: 1.25rem;
-        line-height: 1.4;
-        font-weight: 700;
-    }
+.reading-width {
+    max-width: var(--size-reading-width);
+}
 
-    p {
-        font-size: var(--text-base);
-        line-height: var(--text-base--line-height);
-    }
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
 
-    a {
-        color: var(--color-brand);
-        text-decoration: underline;
-    }
+.skip-link {
+    position: absolute;
+    left: 0.5rem;
+    top: -3rem;
+    padding: 0.5rem 1rem;
+    background: var(--color-surface);
+    z-index: 100;
+}
 
-    /*
-     * A visible focus ring is not optional. MUI's is React-state gated and never fires on a
-     * static page, which is one of the accessibility failures this starter exists to avoid.
-     */
-    :focus-visible {
-        outline: 3px solid var(--color-focus);
-        outline-offset: 2px;
-    }
+.skip-link:focus {
+    top: 0.5rem;
+}
 
-    /*
-     * The only place !important is legitimate in this stylesheet. A user who has asked their
-     * operating system to reduce motion must win over any animation a component declares later,
-     * and there is no specificity that guarantees that.
-     */
-    @media (prefers-reduced-motion: reduce) {
-        *,
-        *::before,
-        *::after {
-            /* biome-ignore lint/complexity/noImportantStyles: user motion preference must win */
-            animation-duration: 0.01ms !important;
-            /* biome-ignore lint/complexity/noImportantStyles: user motion preference must win */
-            animation-iteration-count: 1 !important;
-            /* biome-ignore lint/complexity/noImportantStyles: user motion preference must win */
-            transition-duration: 0.01ms !important;
-            /* biome-ignore lint/complexity/noImportantStyles: user motion preference must win */
-            scroll-behavior: auto !important;
-        }
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        /* biome-ignore lint/complexity/noImportantStyles: the user's motion preference must win */
+        animation-duration: 0.01ms !important;
+        /* biome-ignore lint/complexity/noImportantStyles: the user's motion preference must win */
+        animation-iteration-count: 1 !important;
+        /* biome-ignore lint/complexity/noImportantStyles: the user's motion preference must win */
+        transition-duration: 0.01ms !important;
+        /* biome-ignore lint/complexity/noImportantStyles: the user's motion preference must win */
+        scroll-behavior: auto !important;
     }
 }
