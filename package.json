@@ -1,0 +1,44 @@
+{
+  "name": "@soliantconsulting/create-astro-app",
+  "version": "0.1.0",
+  "description": "Create an Astro static site",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/soliantconsulting/create-astro-app.git"
+  },
+  "type": "module",
+  "author": "Soliant Consulting",
+  "license": "MIT",
+  "files": [
+    "dist/**/*",
+    "skeleton/**/*"
+  ],
+  "bin": {
+    "create-astro-app": "./dist/cli.js"
+  },
+  "scripts": {
+    "test-synth": "rm -rf ./test-synth && tsx ./src/test-cli.ts test-synth",
+    "build": "tsc",
+    "format": "biome format . --write",
+    "check": "biome check . --write"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.6",
+    "@commitlint/cli": "^21.2.1",
+    "@commitlint/config-conventional": "^21.2.0",
+    "@tsconfig/node26": "^26.0.0",
+    "@types/node": "^26.1.2",
+    "lefthook": "^2.1.10",
+    "tsx": "^4.23.2",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@aws-sdk/client-acm": "^3.1101.0",
+    "@listr2/prompt-adapter-enquirer": "^4.3.0",
+    "@soliantconsulting/sld-dns-control-client": "^1.0.0",
+    "@soliantconsulting/starter-lib": "^3.0.0",
+    "enquirer": "^2.4.1",
+    "listr2": "^11.0.0"
+  },
+  "packageManager": "pnpm@11.0.9+sha512.34ce82e6780233cf9cad8685029a8f81d2e06196c5a9bad98879f7424940c6817c4e4524fb7d38b8553ceed48b9758b8ebaf1abd3600c232c4c8cf7366086f38"
+}

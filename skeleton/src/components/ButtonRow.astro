@@ -1,0 +1,12 @@
+---
+/**
+ * Encodes the standing rule that buttons stack block-level at phone widths and sit inline from
+ * the small breakpoint up. Buttons live inside this wrapper so the rule is structural rather
+ * than something each page remembers. Assertion A18 in scripts/seo-check.ts fails the build on a
+ * button-styled link that is not inside one.
+ */
+---
+
+<div data-button-row class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+    <slot />
+</div>

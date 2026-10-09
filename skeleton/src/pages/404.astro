@@ -1,0 +1,30 @@
+---
+/**
+ * Deliberately standalone rather than built on BaseLayout.
+ *
+ * This page is what CloudFront serves for an unknown URL, and it must render even if the route
+ * registry is broken, so it takes no dependency on it. It is also the reason the distribution can
+ * return a real 404 status instead of rewriting every unknown path to the homepage at HTTP 200,
+ * which is the defect this starter exists to fix.
+ */
+import "../styles/global.css";
+---
+
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Page not found</title>
+        <meta name="robots" content="noindex, follow" />
+    </head>
+    <body>
+        <main class="mx-auto max-w-3xl px-4 py-16">
+            <h1>Page not found</h1>
+            <p class="mt-4">
+                The page you asked for does not exist. It may have been moved or removed.
+            </p>
+            <p class="mt-4"><a href="/">Return to the home page</a></p>
+        </main>
+    </body>
+</html>

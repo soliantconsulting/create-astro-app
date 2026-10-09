@@ -1,0 +1,85 @@
+{
+    "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+    "assist": { "actions": { "source": { "organizeImports": "on" } } },
+    "css": {
+        "parser": {
+            "tailwindDirectives": true
+        }
+    },
+    "files": {
+        "includes": [
+            "biome.json",
+            "commitlint.config.cjs",
+            "astro.config.mjs",
+            "scripts/**/*",
+            "src/**/*",
+            "!cdk/cdk.out",
+            "!src/assets",
+            "!.astro"
+        ]
+    },
+    "linter": {
+        "enabled": true,
+        "rules": {
+            "preset": "recommended",
+            "complexity": {
+                "noExcessiveCognitiveComplexity": "warn",
+                "useSimplifiedLogicExpression": "error"
+            },
+            "correctness": {
+                "noUnusedImports": "error",
+                "noUnusedPrivateClassMembers": "error",
+                "noInvalidBuiltinInstantiation": "error",
+                "noSwitchDeclarations": "error",
+                "noUnusedVariables": {
+                    "level": "error",
+                    "options": {
+                        "ignoreRestSiblings": true
+                    }
+                }
+            },
+            "style": {
+                "useBlockStatements": "error",
+                "useCollapsedElseIf": "error",
+                "useForOf": "error",
+                "useShorthandAssign": "error",
+                "noParameterAssign": "error",
+                "useAsConstAssertion": "error",
+                "useDefaultParameterLast": "error",
+                "useEnumInitializers": "error",
+                "useSingleVarDeclarator": "error",
+                "noUnusedTemplateLiteral": "error",
+                "useNumberNamespace": "error",
+                "noInferrableTypes": "error",
+                "noUselessElse": "error",
+                "useConsistentArrayType": { "level": "error", "options": { "syntax": "shorthand" } }
+            },
+            "suspicious": {
+                "noApproximativeNumericConstant": "warn",
+                "noEmptyBlockStatements": "error",
+                "noConsole": {
+                    "level": "error",
+                    "options": { "allow": ["assert", "error", "info", "warn", "debug"] }
+                }
+            }
+        }
+    },
+    "overrides": [
+        {
+            "includes": ["**/*.astro"],
+            "linter": {
+                "rules": {
+                    "correctness": {
+                        "noUnusedVariables": "off",
+                        "noUnusedImports": "off"
+                    }
+                }
+            }
+        }
+    ],
+    "formatter": {
+        "indentStyle": "space",
+        "indentWidth": 4,
+        "lineWidth": 100
+    }
+}

@@ -1,0 +1,114 @@
+/*
+ * The single styling source for this site.
+ *
+ * source() bounds the class scan to the source tree. Without it Tailwind walks the whole project
+ * directory, which is fine at 15 pages and expensive at 15,000. The path is resolved relative to
+ * this file, so "../" means src/, not the project root.
+ */
+@import "tailwindcss" source("../");
+
+/*
+ * Closing the palette and the breakpoint set.
+ *
+ * `--color-*: initial` and `--breakpoint-*: initial` delete Tailwind's defaults, so `bg-teal-400`
+ * and `lg:` stop existing unless this file defines them. That turns a typo or an off-palette
+ * colour from something that silently ships into a class with no rule, which assertion A17 in
+ * scripts/seo-check.ts then fails the build on.
+ */
+@theme {
+    --color-*: initial;
+    --breakpoint-*: initial;
+
+    /* Replace every value below with tokens taken from the design being implemented. */
+    --color-brand: #0e82b2;
+    --color-brand-dark: #073c5e;
+    --color-ink: #333333;
+    --color-ink-muted: #666666;
+    --color-surface: #ffffff;
+    --color-surface-alt: #f4f4f4;
+    --color-border: #d8d8d8;
+    --color-focus: #0b6d95;
+
+    --breakpoint-sm: 550px;
+    --breakpoint-md: 768px;
+    --breakpoint-lg: 992px;
+    --breakpoint-xl: 1200px;
+
+    --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+    --text-base: 1rem;
+    --text-base--line-height: 1.6;
+}
+
+/*
+ * Element defaults live here, not in classes.
+ *
+ * A heading, paragraph or link carries no class anywhere in this site. That is what keeps the
+ * class attributes in pages down to layout only, and it means a type-scale change is an edit to
+ * this file rather than a find and replace across every template.
+ */
+@layer base {
+    html {
+        font-family: var(--font-sans);
+        color: var(--color-ink);
+        background-color: var(--color-surface);
+        -webkit-text-size-adjust: 100%;
+    }
+
+    h1 {
+        font-size: 2rem;
+        line-height: 1.2;
+        font-weight: 700;
+    }
+
+    h2 {
+        font-size: 1.5rem;
+        line-height: 1.3;
+        font-weight: 700;
+    }
+
+    h3 {
+        font-size: 1.25rem;
+        line-height: 1.4;
+        font-weight: 700;
+    }
+
+    p {
+        font-size: var(--text-base);
+        line-height: var(--text-base--line-height);
+    }
+
+    a {
+        color: var(--color-brand);
+        text-decoration: underline;
+    }
+
+    /*
+     * A visible focus ring is not optional. MUI's is React-state gated and never fires on a
+     * static page, which is one of the accessibility failures this starter exists to avoid.
+     */
+    :focus-visible {
+        outline: 3px solid var(--color-focus);
+        outline-offset: 2px;
+    }
+
+    /*
+     * The only place !important is legitimate in this stylesheet. A user who has asked their
+     * operating system to reduce motion must win over any animation a component declares later,
+     * and there is no specificity that guarantees that.
+     */
+    @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+            /* biome-ignore lint/complexity/noImportantStyles: user motion preference must win */
+            animation-duration: 0.01ms !important;
+            /* biome-ignore lint/complexity/noImportantStyles: user motion preference must win */
+            animation-iteration-count: 1 !important;
+            /* biome-ignore lint/complexity/noImportantStyles: user motion preference must win */
+            transition-duration: 0.01ms !important;
+            /* biome-ignore lint/complexity/noImportantStyles: user motion preference must win */
+            scroll-behavior: auto !important;
+        }
+    }
+}

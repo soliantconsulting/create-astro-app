@@ -1,0 +1,20 @@
+{
+    "name": "cdk",
+    "version": "1.0.0",
+    "type": "module",
+    "scripts": {
+        "build": "tsc"
+    },
+    "devDependencies": {
+        "@tsconfig/node26": "^26.0.0",
+        "@types/fs-extra": "^11.0.4",
+        "@types/node": "^26.1.2",
+        "aws-cdk": "^2.1111.0",
+        "typescript": "^7.0.2"
+    },
+    "dependencies": {
+        "aws-cdk-lib": "^2.243.0",
+        "constructs": "^10.5.1",
+        "fs-extra": "^11.3.0"
+    }
+}

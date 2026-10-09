@@ -1,0 +1,21 @@
+---
+import Button from "../components/Button.astro";
+import ButtonRow from "../components/ButtonRow.astro";
+import BaseLayout from "../layouts/BaseLayout.astro";
+---
+
+<BaseLayout path="/">
+    <section class="mx-auto max-w-5xl px-4 py-12">
+        <h1>Replace this heading</h1>
+        <p class="mt-4 max-w-2xl">
+            This page is a placeholder. Its title and description come from the entry for "/" in
+            src/seo/routes.ts, not from anything on this page.
+        </p>
+        <div class="mt-8">
+            <ButtonRow>
+                <Button href="/about/">Primary action</Button>
+                <Button href="/about/" variant="secondary">Secondary action</Button>
+            </ButtonRow>
+        </div>
+    </section>
+</BaseLayout>

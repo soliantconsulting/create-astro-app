@@ -1,0 +1,33 @@
+---
+/**
+ * Variants are looked up in a map, never built by interpolating a string. Tailwind scans source
+ * text for complete class names, so `bg-${variant}` compiles to nothing and fails silently. That
+ * is the single most common way a Tailwind codebase ships an unstyled control.
+ */
+type Variant = "primary" | "secondary";
+
+type Props = {
+    href: string;
+    variant?: Variant;
+    external?: boolean;
+};
+
+const { href, variant = "primary", external = false } = Astro.props;
+
+const base =
+    "inline-flex w-full items-center justify-center px-5 py-3 font-semibold no-underline sm:w-auto";
+
+const variants: Record<Variant, string> = {
+    primary: "bg-brand text-surface hover:bg-brand-dark",
+    secondary: "border border-brand bg-surface text-brand hover:bg-surface-alt",
+};
+---
+
+<a
+    href={href}
+    class={`${base} ${variants[variant]}`}
+    {...external ? { target: "_blank", rel: "noopener noreferrer" } : {}}
+>
+    <slot />
+    {external && <span class="sr-only">(opens in a new tab)</span>}
+</a>

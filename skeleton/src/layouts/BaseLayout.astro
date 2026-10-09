@@ -1,0 +1,85 @@
+---
+import { breadcrumbTrail, canonicalUrl, getRoute, navRoutes, SITE_URL } from "../seo/routes.js";
+import "../styles/global.css";
+
+type Props = {
+    /**
+     * The page's own registered path. There is deliberately no `title` or `description` prop:
+     * a page cannot invent its own metadata, it declares which route it is and the registry
+     * supplies the rest. That is the whole mechanism preventing duplicate titles at scale.
+     */
+    path: string;
+};
+
+const { path } = Astro.props;
+const route = getRoute(path);
+const canonical = canonicalUrl(route.path);
+const nav = navRoutes();
+const trail = breadcrumbTrail(route.path);
+
+const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: trail.map((item, index) => ({
+        "@type": "ListItem",
+        position: index + 1,
+        name: item.navLabel ?? item.title,
+        item: canonicalUrl(item.path),
+    })),
+};
+---
+
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>{route.title}</title>
+        <meta name="description" content={route.description} />
+        <link rel="canonical" href={canonical} />
+        {!route.indexable && <meta name="robots" content="noindex, follow" />}
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content={route.title} />
+        <meta property="og:description" content={route.description} />
+        <meta property="og:url" content={canonical} />
+        <link rel="sitemap" href={new URL("/sitemap.xml", SITE_URL).href} />
+        {
+            trail.length > 1 && (
+                <script
+                    is:inline
+                    type="application/ld+json"
+                    set:html={JSON.stringify(breadcrumbJsonLd)}
+                />
+            )
+        }
+    </head>
+    <body>
+        <a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2">
+            Skip to content
+        </a>
+        <header>
+            <nav aria-label="Primary">
+                <ul class="flex flex-wrap gap-4">
+                    {
+                        nav.map((item) => (
+                            <li>
+                                <a
+                                    href={item.path}
+                                    aria-current={item.path === route.path ? "page" : undefined}
+                                >
+                                    {item.navLabel}
+                                </a>
+                            </li>
+                        ))
+                    }
+                </ul>
+            </nav>
+        </header>
+        <main id="main">
+            <slot />
+        </main>
+        <footer>
+            <p>&copy; {new Date().getFullYear()}</p>
+        </footer>
+    </body>
+</html>

@@ -1,0 +1,23 @@
+import { App } from "aws-cdk-lib";
+import { AppStack } from "./app-stack.js";
+
+const app = new App();
+
+new AppStack(app, "{{project.name}}-staging", {
+    env: {
+        account: "{{awsEnv.accountId}}",
+        region: "{{awsEnv.region}}",
+    },
+    certificateArn: "{{stagingDomain.certificateArn}}",
+    domainName: "{{stagingDomain.domainName}}",
+    buildEnv: {
+        {%- if sentry %}
+        SENTRY_ENVIRONMENT: "staging",
+        {%- endif %}
+        {%- if features contains "contact-form" %}
+        PUBLIC_RECAPTCHA_SITE_KEY: "",
+        {%- endif %}
+    },
+});
+
+app.synth();

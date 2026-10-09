@@ -1,0 +1,38 @@
+// @ts-check
+import tailwindcss from "@tailwindcss/vite";
+{%- if sentry %}
+import sentry from "@sentry/astro";
+{%- endif %}
+import { defineConfig } from "astro/config";
+import { SITE_URL } from "./src/seo/routes.js";
+
+export default defineConfig({
+    site: SITE_URL,
+    // Astro's default is "auto", which inlines any stylesheet under 4 kB into every page. On a
+    // multi-page site that trades one cached request for N copies of the same bytes, and at
+    // catalog scale it is the single most expensive default in the config.
+    build: {
+        inlineStylesheets: "never",
+        // Directory format emits /about/index.html, so the URL is /about/ and the CloudFront
+        // viewer-request function in cdk/src/app-stack.ts appends index.html to match.
+        format: "directory",
+    },
+    // Tailwind 4 ships as a Vite plugin. Do NOT use the @astrojs/tailwind integration: it is
+    // deprecated, it targets Tailwind 3, and placing it in `integrations` fails silently by
+    // emitting no styles at all rather than erroring.
+    vite: {
+        plugins: [tailwindcss()],
+    },
+    {%- if sentry %}
+    // The DSN is configured in sentry.client.config.js, not here. Passing it to the integration
+    // is deprecated and warns on every build.
+    integrations: [
+        sentry({
+            sourceMapsUploadOptions: {
+                project: "{{sentry.projectSlug}}",
+                org: "{{sentry.org}}",
+            },
+        }),
+    ],
+    {%- endif %}
+});

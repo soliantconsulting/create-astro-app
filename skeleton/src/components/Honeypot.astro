@@ -1,0 +1,23 @@
+---
+/**
+ * A field a bot fills and a person never sees.
+ *
+ * aria-hidden plus tabindex="-1" keep it out of the accessibility tree and out of the tab order.
+ * That part is usually omitted, and omitting it is worse than having no honeypot: a screen reader
+ * user tabs into a labelled field, fills it in, and their submission is silently discarded.
+ *
+ * Positioned off-canvas rather than display:none because some bots skip hidden fields.
+ */
+import { HONEYPOT_FIELD } from "../forms/contact.js";
+---
+
+<div aria-hidden="true" class="absolute left-[-9999px] top-auto h-px w-px overflow-hidden">
+    <label for={HONEYPOT_FIELD}>Leave this field empty</label>
+    <input
+        id={HONEYPOT_FIELD}
+        name={HONEYPOT_FIELD}
+        type="text"
+        tabindex="-1"
+        autocomplete="off"
+    />
+</div>

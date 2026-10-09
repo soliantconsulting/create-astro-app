@@ -1,0 +1,17 @@
+---
+/**
+ * Encodes the standing rule that a table may scroll horizontally inside its container rather than
+ * forcing the page to scroll. The role, tabindex and label are the part usually omitted: without
+ * them a keyboard user cannot reach the scroll region at all, which turns a layout convenience
+ * into a WCAG 2.1.1 failure.
+ */
+type Props = {
+    label: string;
+};
+
+const { label } = Astro.props;
+---
+
+<div role="region" aria-label={label} tabindex="0" class="w-full overflow-x-auto">
+    <slot />
+</div>
