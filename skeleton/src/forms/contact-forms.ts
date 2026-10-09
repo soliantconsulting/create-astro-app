@@ -40,7 +40,9 @@ export const contactForms: ContactFormDefinition[] = [
     },
 ];
 
-export const HONEYPOT_FIELD = "company_website";
+// Deliberately not a word browser autofill recognizes (company, website, url, name...): an
+// autofilled honeypot would silently discard a real visitor's message.
+export const HONEYPOT_FIELD = "form_trap";
 
 export const findContactForm = (id: string): ContactFormDefinition | undefined =>
     contactForms.find((form) => form.id === id);

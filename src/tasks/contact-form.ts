@@ -42,7 +42,7 @@ type ContactFormTaskContext = Partial<
     ProjectContext & AwsEnvContext & FeaturesContext & StagingDomainContext & ContactFormContext
 >;
 
-type TaskWrapper = Parameters<NonNullable<ListrTask<ContactFormTaskContext>["task"]>>[1];
+type Note = (line: string) => void;
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -76,6 +76,12 @@ export const recaptchaSecretName = (projectName: string, environment: string): s
 
 export const contactFormTask: ListrTask<ContactFormTaskContext> = {
     title: "Configure contact form",
+    // DNS records for a sender outside soliant-dev.io are printed here for someone to add by hand,
+    // so the output has to outlive the task.
+    rendererOptions: {
+        persistentOutput: true,
+        outputBar: Number.POSITIVE_INFINITY,
+    },
     task: async (context, task): Promise<void> => {
         const features = requireContext(context, "features");
 
@@ -133,12 +139,19 @@ export const contactFormTask: ListrTask<ContactFormTaskContext> = {
             })
         ).trim();
 
-        const recaptchaSecretKey = (
-            await prompt.run<string>({
-                type: "password",
-                message: "reCAPTCHA v3 secret key for staging (blank to add later):",
-            })
-        ).trim();
+        // A stored secret with no site key in the build would reject every visitor, so the secret
+        // is only asked for alongside a site key.
+        const recaptchaSecretKey =
+            recaptchaSiteKey === ""
+                ? ""
+                : (
+                      await prompt.run<string>({
+                          type: "password",
+                          message: "reCAPTCHA v3 secret key that pairs with that site key:",
+                          validate: (input: string) =>
+                              input.trim() === "" ? "Enter the secret key for the site key" : true,
+                      })
+                  ).trim();
 
         context.contactForm = {
             recipients,
@@ -149,8 +162,14 @@ export const contactFormTask: ListrTask<ContactFormTaskContext> = {
             recaptchaSecretName: recaptchaSecretName(project.name, "staging"),
         };
 
+        const notes: string[] = [];
+        const note = (line: string): void => {
+            notes.push(line);
+            task.output = notes.join("\n");
+        };
+
         if (awsEnv === null) {
-            task.output = "AWS environment disabled, skipping SES and Secrets Manager setup";
+            note("AWS environment disabled, skipping SES and Secrets Manager setup");
             return;
         }
 
@@ -158,8 +177,8 @@ export const contactFormTask: ListrTask<ContactFormTaskContext> = {
         const ses = new SESv2Client({ region: awsEnv.region });
         const senderDomain = contactForm.senderAddress.split("@")[1];
 
-        await verifySenderDomain(ses, senderDomain, task);
-        await verifySandboxRecipients(ses, contactForm.recipients, task);
+        await verifySenderDomain(ses, senderDomain, note);
+        await verifySandboxRecipients(ses, contactForm.recipients, note);
 
         if (recaptchaSecretKey !== "") {
             await storeRecaptchaSecret(
@@ -191,11 +210,7 @@ const getDkimTokens = async (ses: SESv2Client, domain: string): Promise<string[]
     }
 };
 
-const verifySenderDomain = async (
-    ses: SESv2Client,
-    domain: string,
-    task: TaskWrapper,
-): Promise<void> => {
+const verifySenderDomain = async (ses: SESv2Client, domain: string, note: Note): Promise<void> => {
     const tokens = await getDkimTokens(ses, domain);
 
     if (tokens.length === 0) {
@@ -208,10 +223,12 @@ const verifySenderDomain = async (
     }));
 
     if (!domain.endsWith(`.${defaultConfig.zoneName}`)) {
-        task.output = [
-            `Add these DKIM CNAME records to the DNS for ${domain} so SES can verify it:`,
-            ...records.map((record) => `  ${record.name} CNAME ${record.value}`),
-        ].join("\n");
+        note(`Add these DKIM CNAME records to the DNS for ${domain} so SES can verify it:`);
+
+        for (const record of records) {
+            note(`  ${record.name} CNAME ${record.value}`);
+        }
+
         return;
     }
 
@@ -225,14 +242,7 @@ const verifySenderDomain = async (
         });
     }
 
-    // DMARC in monitoring mode. Receivers start reporting alignment without rejecting anything.
-    await dns.upsertRecord({
-        name: toRelativeName(`_dmarc.${domain}`, defaultConfig.zoneName),
-        type: "TXT",
-        value: "v=DMARC1; p=none;",
-    });
-
-    task.output = `Published DKIM and DMARC records for ${domain}; SES verifies it within minutes`;
+    note(`Published DKIM records for ${domain}; SES verifies it within minutes`);
 };
 
 const isVerifiedIdentity = async (ses: SESv2Client, identity: string): Promise<boolean> => {
@@ -258,7 +268,7 @@ const isVerifiedIdentity = async (ses: SESv2Client, identity: string): Promise<b
 const verifySandboxRecipients = async (
     ses: SESv2Client,
     recipients: string[],
-    task: TaskWrapper,
+    note: Note,
 ): Promise<void> => {
     const account = await ses.send(new GetAccountCommand({}));
 
@@ -285,7 +295,7 @@ const verifySandboxRecipients = async (
     }
 
     if (pending.length > 0) {
-        task.output = `SES is in the sandbox. Verification emails sent to: ${pending.join(", ")}`;
+        note(`SES is in the sandbox. Verification emails sent to: ${pending.join(", ")}`);
     }
 };
 

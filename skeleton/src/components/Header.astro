@@ -75,7 +75,10 @@ const nav = navRoutes();
         text-decoration: none;
     }
 
+    /* Collapsing the menu needs the toggle script, so it only happens on pages where scripts run
+       (Layout marks those with a "js" class). Without JavaScript the navigation is shown. */
     .site-header__toggle {
+        display: none;
         font: inherit;
         padding: 0.5rem 0.75rem;
         border: 1px solid var(--color-border);
@@ -84,12 +87,19 @@ const nav = navRoutes();
         color: var(--color-ink);
     }
 
+    :global(.js) .site-header__toggle {
+        display: inline-block;
+    }
+
     .site-header__nav {
-        display: none;
         width: 100%;
     }
 
-    .site-header__nav.is-open {
+    :global(.js) .site-header__nav {
+        display: none;
+    }
+
+    :global(.js) .site-header__nav.is-open {
         display: block;
     }
 
@@ -115,11 +125,12 @@ const nav = navRoutes();
     }
 
     @media (min-width: 64em) {
-        .site-header__toggle {
+        :global(.js) .site-header__toggle {
             display: none;
         }
 
-        .site-header__nav {
+        .site-header__nav,
+        :global(.js) .site-header__nav {
             display: block;
             width: auto;
         }

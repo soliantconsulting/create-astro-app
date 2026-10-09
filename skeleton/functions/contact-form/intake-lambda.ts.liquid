@@ -19,6 +19,7 @@ const configSchema = z.object({
     QUEUE_URL: z.url(),
     QUARANTINE_BUCKET: z.string().min(1),
     RECAPTCHA_SECRET_NAME: z.string().min(1),
+    RECAPTCHA_SITE_KEY: z.string(),
     RECAPTCHA_MIN_SCORE: z.coerce.number().min(0).max(1),
     ALLOWED_HOSTNAMES: z
         .string()
@@ -79,6 +80,24 @@ const handler = createIntakeHandler({
         } catch (error) {
             console.error("Failed to read the reCAPTCHA secret", { error });
             return { kind: "unavailable", reason: "the reCAPTCHA secret could not be read" };
+        }
+
+        // A page built without a site key never sends a token, so checking against a stored secret
+        // would turn every visitor away. Half a configuration is a mistake worth an alarm.
+        if (config.RECAPTCHA_SITE_KEY === "") {
+            if (secret !== null) {
+                console.error(
+                    "A reCAPTCHA secret is stored but the site was built without a site key; rebuild with PUBLIC_RECAPTCHA_SITE_KEY",
+                );
+            }
+
+            return { kind: "unconfigured" };
+        }
+
+        if (secret === null) {
+            console.error(
+                `The site has a reCAPTCHA site key but no secret is stored at ${config.RECAPTCHA_SECRET_NAME}`,
+            );
         }
 
         return verifyRecaptcha({

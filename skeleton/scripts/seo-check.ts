@@ -220,7 +220,8 @@ for (const [from, to] of Object.entries(redirects)) {
         fail("A21 redirects", `Redirect source "${from}" must be a path starting with "/".`);
     }
 
-    if (builtPaths.has(from)) {
+    // CloudFront matches redirect sources case-insensitively, so compare the same way.
+    if ([...builtPaths].some((path) => path.toLowerCase() === from.toLowerCase())) {
         fail("A21 redirects", `Redirect from "${from}" would hide the page built at that path.`);
     }
 
@@ -228,11 +229,11 @@ for (const [from, to] of Object.entries(redirects)) {
         continue;
     }
 
-    if (redirectSources.has(to.toLowerCase())) {
+    const targetPath = to.split(/[?#]/)[0];
+
+    if (redirectSources.has(targetPath.toLowerCase())) {
         fail("A21 redirects", `Redirect "${from}" -> "${to}" chains into another redirect.`);
     }
-
-    const targetPath = to.split(/[?#]/)[0];
 
     if (!builtPaths.has(targetPath)) {
         fail("A21 redirects", `Redirect "${from}" -> "${to}" points at a page that was not built.`);
@@ -252,14 +253,58 @@ if (ALLOW_INDEXING === disallowsAll) {
     );
 }
 
-// A19 CSS weight budget
-const cssBytes = cssFiles.reduce((total, file) => total + statSync(file).size, 0);
+// A19 CSS weight budget per page: inline <style> blocks plus linked stylesheets, so the budget
+// still holds when Astro inlines the CSS (build.inlineStylesheets).
+const cssFileSizes = new Map(cssFiles.map((file) => [pageOf(file), statSync(file).size]));
 
-if (cssBytes > CSS_BUDGET_BYTES) {
+const pageCssBytes = (html: string): number => {
+    const inline = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].reduce(
+        (total, match) => total + Buffer.byteLength(match[1], "utf-8"),
+        0,
+    );
+    const linked = [...html.matchAll(/<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"/g)].reduce(
+        (total, match) => total + (cssFileSizes.get(match[1]) ?? 0),
+        0,
+    );
+
+    return inline + linked;
+};
+
+let largestCssPage = { page: "", bytes: 0 };
+
+for (const file of htmlFiles) {
+    const bytes = pageCssBytes(readFileSync(file, "utf-8"));
+
+    if (bytes > largestCssPage.bytes) {
+        largestCssPage = { page: pageOf(file), bytes };
+    }
+}
+
+if (largestCssPage.bytes > CSS_BUDGET_BYTES) {
     fail(
         "A19 CSS budget",
-        `Emitted CSS is ${cssBytes} bytes, over the ${CSS_BUDGET_BYTES} byte budget. Raise it deliberately or find what pulled it up.`,
+        `${largestCssPage.page} carries ${largestCssPage.bytes} bytes of CSS, over the ${CSS_BUDGET_BYTES} byte budget. Raise it deliberately or find what pulled it up.`,
     );
+}
+
+// A22 every internal link resolves to a built page or file, so renaming a route cannot leave a
+// link behind that answers 404.
+const distFiles = new Set(walk(DIST, () => true).map(pageOf));
+
+for (const file of htmlFiles) {
+    const html = readFileSync(file, "utf-8");
+
+    for (const match of html.matchAll(/\shref="(\/(?!\/)[^"]*)"/g)) {
+        const target = match[1].split(/[?#]/)[0];
+
+        // The viewer-request function serves /about as /about/index.html, so both forms work.
+        if (!(builtPaths.has(target) || builtPaths.has(`${target}/`) || distFiles.has(target))) {
+            fail(
+                "A22 internal links resolve",
+                `${pageOf(file)} links to "${match[1]}", which is neither a built page nor a file in dist/.`,
+            );
+        }
+    }
 }
 
 // A20 colors come from src/theme/tokens.ts, so a palette change is one edit
@@ -296,5 +341,5 @@ if (failures.length > 0) {
 }
 
 console.info(
-    `seo-check passed: ${htmlFiles.length} page(s), ${cssBytes} bytes of CSS, ${indexableRoutes().length} indexable route(s).`,
+    `seo-check passed: ${htmlFiles.length} page(s), largest page CSS ${largestCssPage.bytes} bytes, ${indexableRoutes().length} indexable route(s).`,
 );

@@ -15,7 +15,7 @@ new AppStack(app, "{{project.name}}-production", {
     allowIndexing: true,
     buildEnv: {
         {%- if sentry %}
-        SENTRY_ENVIRONMENT: "production",
+        PUBLIC_SENTRY_ENVIRONMENT: "production",
         {%- endif %}
         {%- if contactForm %}
         PUBLIC_RECAPTCHA_SITE_KEY: "CHANGE-ME",
@@ -24,7 +24,7 @@ new AppStack(app, "{{project.name}}-production", {
     {%- if contactForm %}
     contactForm: {
         siteName: "{{project.title}}",
-        recipients: [{% for recipient in contactForm.recipients %}"{{recipient}}"{% unless forloop.last %}, {% endunless %}{% endfor %}],
+        recipients: ["CHANGE-ME"],
         senderAddress: "CHANGE-ME",
         timeZone: "{{contactForm.timeZone}}",
         alarmEmail: {% if contactForm.alarmEmail %}"{{contactForm.alarmEmail}}"{% else %}null{% endif %},

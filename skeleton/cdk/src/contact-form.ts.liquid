@@ -31,6 +31,8 @@ export type ContactFormProps = {
     timeZone: string;
     alarmEmail: string | null;
     recaptchaSecretName: string;
+    /** The site key the pages were built with; empty when the build has none. */
+    recaptchaSiteKey: string;
     {%- if sentry %}
     sentryDsn: string;
     sentryEnvironment: string;
@@ -38,6 +40,7 @@ export type ContactFormProps = {
 };
 
 const projectRoot = fileURLToPath(new URL("../../", import.meta.url));
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Attempts before a message moves to the dead letter queue. The worker reads the same value so it
 // reports a failure on the final attempt.
@@ -59,6 +62,20 @@ export class ContactForm extends Construct {
 
     public constructor(scope: Construct, id: string, props: ContactFormProps) {
         super(scope, id);
+
+        const addresses = [
+            props.senderAddress,
+            ...props.recipients,
+            ...(props.alarmEmail === null ? [] : [props.alarmEmail]),
+        ];
+
+        for (const address of addresses) {
+            if (!emailPattern.test(address)) {
+                throw new Error(
+                    `Contact form address "${address}" is not an email address. Fill in every CHANGE-ME in cdk/src/env-*.ts before deploying.`,
+                );
+            }
+        }
 
         const stack = Stack.of(this);
 
@@ -117,6 +134,7 @@ export class ContactForm extends Construct {
                 QUEUE_URL: queue.queueUrl,
                 QUARANTINE_BUCKET: quarantineBucket.bucketName,
                 RECAPTCHA_SECRET_NAME: props.recaptchaSecretName,
+                RECAPTCHA_SITE_KEY: props.recaptchaSiteKey,
                 RECAPTCHA_MIN_SCORE,
                 ALLOWED_HOSTNAMES: props.hostnames.join(","),
             },
@@ -166,13 +184,22 @@ export class ContactForm extends Construct {
             }),
         );
 
+        const domainOf = (address: string): string => address.slice(address.indexOf("@") + 1);
+        const identityArn = (identity: string): string =>
+            stack.formatArn({ service: "ses", resource: "identity", resourceName: identity });
+
         worker.addToRolePolicy(
             new PolicyStatement({
                 actions: ["ses:SendEmail"],
-                // While the account is in the SES sandbox, IAM also checks the verified recipient
-                // identities, so the grant covers every identity in this account and region.
+                // The sending identity, plus each recipient as an address or a domain identity: while
+                // the account is in the SES sandbox, SES also authorizes the recipients' identities.
                 resources: [
-                    stack.formatArn({ service: "ses", resource: "identity", resourceName: "*" }),
+                    ...new Set(
+                        [props.senderAddress, ...props.recipients].flatMap((address) => [
+                            identityArn(address),
+                            identityArn(domainOf(address)),
+                        ]),
+                    ),
                 ],
             }),
         );

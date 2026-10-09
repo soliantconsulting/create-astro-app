@@ -53,7 +53,7 @@ type AppStackProps = StackProps & {
     allowIndexing: boolean;
     buildEnv: BuildEnv;
     {%- if contactForm %}
-    contactForm: Omit<ContactFormProps, "hostnames">;
+    contactForm: Omit<ContactFormProps, "hostnames" | "recaptchaSiteKey">;
     {%- endif %}
 };
 
@@ -84,8 +84,7 @@ export class AppStack extends Stack {
 
         // Astro builds /about/ as /about/index.html, and S3 behind Origin Access Control does no
         // directory-index resolution, so clean URLs are mapped to their index.html at the edge.
-        const directoryIndex = new CloudFrontFunction(this, "DirectoryIndex", {
-            code: FunctionCode.fromInline(`
+        const viewerRequestCode = `
 var redirects = ${JSON.stringify(redirects)};
 
 function queryString(querystring) {
@@ -100,7 +99,21 @@ function queryString(querystring) {
         }
     }
 
-    return parts.length > 0 ? "?" + parts.join("&") : "";
+    return parts.join("&");
+}
+
+function withQuery(target, querystring) {
+    var query = queryString(querystring);
+
+    if (query === "") {
+        return target;
+    }
+
+    var hashIndex = target.indexOf("#");
+    var base = hashIndex === -1 ? target : target.slice(0, hashIndex);
+    var hash = hashIndex === -1 ? "" : target.slice(hashIndex);
+
+    return base + (base.indexOf("?") === -1 ? "?" : "&") + query + hash;
 }
 
 function handler(event) {
@@ -112,7 +125,7 @@ function handler(event) {
         return {
             statusCode: 301,
             statusDescription: "Moved Permanently",
-            headers: { location: { value: target + queryString(request.querystring) } },
+            headers: { location: { value: withQuery(target, request.querystring) } },
         };
     }
 
@@ -124,7 +137,20 @@ function handler(event) {
 
     return request;
 }
-`),
+`;
+
+        // CloudFront rejects function code over 10 KB, but only when the deploy reaches it. A few
+        // hundred redirects is enough to get there.
+        const viewerRequestBytes = Buffer.byteLength(viewerRequestCode, "utf-8");
+
+        if (viewerRequestBytes > 9_500) {
+            throw new Error(
+                `src/seo/redirects.json makes the CloudFront viewer-request function ${viewerRequestBytes} bytes; CloudFront allows 10,240. Move the redirect map into a CloudFront KeyValueStore.`,
+            );
+        }
+
+        const directoryIndex = new CloudFrontFunction(this, "DirectoryIndex", {
+            code: FunctionCode.fromInline(viewerRequestCode),
         });
 
         const robotsHeaders: ResponseCustomHeader[] = props.allowIndexing
@@ -181,6 +207,7 @@ function handler(event) {
         const contactForm = new ContactForm(this, "ContactForm", {
             ...props.contactForm,
             hostnames: [props.domainName],
+            recaptchaSiteKey: props.buildEnv.PUBLIC_RECAPTCHA_SITE_KEY ?? "",
         });
         {%- endif %}
 

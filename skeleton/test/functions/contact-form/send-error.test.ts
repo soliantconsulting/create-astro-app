@@ -5,8 +5,8 @@ import { classifySendError } from "../../../functions/contact-form/send-error.js
 const sesError = (name: string): Error => Object.assign(new Error(name), { name });
 
 describe("classifySendError", () => {
-    // Every SESv2 SendEmail error name is listed, because a misfiled one either retries forever or
-    // silently drops a message, and both look like a working worker.
+    // Every SESv2 SendEmail error name is listed: the class decides whether a failure pages someone
+    // at once or only on its last attempt, and a misfiled one still looks like a working worker.
     const expectations = [
         ["MessageRejected", "permanent"],
         ["BadRequestException", "permanent"],

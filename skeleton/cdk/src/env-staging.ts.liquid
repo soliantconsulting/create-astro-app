@@ -13,7 +13,7 @@ new AppStack(app, "{{project.name}}-staging", {
     allowIndexing: false,
     buildEnv: {
         {%- if sentry %}
-        SENTRY_ENVIRONMENT: "staging",
+        PUBLIC_SENTRY_ENVIRONMENT: "staging",
         {%- endif %}
         {%- if contactForm %}
         PUBLIC_RECAPTCHA_SITE_KEY: "{{contactForm.recaptchaSiteKey}}",

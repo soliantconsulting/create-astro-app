@@ -2,7 +2,9 @@ import { match } from "ts-pattern";
 import { z } from "zod";
 import type { ContactField, ContactFormDefinition } from "../../src/forms/contact-forms.js";
 
-const phonePattern = /^[0-9+().\s-]{7,}(\s*(x|ext\.?)\s*\d+)?$/i;
+// The extension group starts at a letter the leading class cannot match, so no input can make
+// the two halves compete for the same characters.
+const phonePattern = /^[0-9+().\s-]{7,}(?:(?:x|ext\.?)\s*\d+)?$/i;
 
 const defaultMaxLength = (field: ContactField): number => (field.type === "textarea" ? 5000 : 200);
 
@@ -12,7 +14,11 @@ const valueSchema = (field: ContactField): z.ZodType<string> => {
         .string()
         .trim()
         .min(1, `Enter your ${field.label.toLowerCase()}`)
-        .max(maxLength, `${field.label} must be ${maxLength} characters or fewer`);
+        // abort stops the format checks below from running on an oversized value.
+        .max(maxLength, {
+            error: `${field.label} must be ${maxLength} characters or fewer`,
+            abort: true,
+        });
 
     return match(field.type)
         .with("email", () => text.pipe(z.email(`Enter a valid ${field.label.toLowerCase()}`)))

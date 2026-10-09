@@ -4,6 +4,6 @@ import * as Sentry from "@sentry/astro";
 // a visitor downloads. Tracing is off; turn it on per site with a measured sample rate.
 Sentry.init({
     dsn: "{{sentry.dsn}}",
-    environment: import.meta.env.SENTRY_ENVIRONMENT ?? import.meta.env.MODE,
+    environment: import.meta.env.PUBLIC_SENTRY_ENVIRONMENT ?? import.meta.env.MODE,
     tracesSampleRate: 0,
 });

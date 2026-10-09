@@ -8,6 +8,7 @@ import {
 } from "../../../functions/contact-form/intake.js";
 import type { ContactMessage } from "../../../functions/contact-form/message.js";
 import type { RecaptchaVerdict } from "../../../functions/contact-form/recaptcha.js";
+import type { ReportLevel } from "../../../functions/contact-form/report.js";
 import { type ContactFormDefinition, HONEYPOT_FIELD } from "../../../src/forms/contact-forms.js";
 
 // A fixture rather than the site's own forms, so editing src/forms/contact-forms.ts for a client
@@ -29,6 +30,7 @@ type Harness = {
     queued: ContactMessage[];
     quarantined: QuarantinedSubmission[];
     actions: string[];
+    reports: ReportLevel[];
 };
 
 const createHarness = (
@@ -38,6 +40,7 @@ const createHarness = (
     const queued: ContactMessage[] = [];
     const quarantined: QuarantinedSubmission[] = [];
     const actions: string[] = [];
+    const reports: ReportLevel[] = [];
 
     const handler = createIntakeHandler({
         forms: [testForm],
@@ -52,13 +55,13 @@ const createHarness = (
             quarantined.push(submission);
         },
         now: () => Temporal.Instant.from("2026-10-09T15:00:00Z"),
-        report: () => {
-            // Reports are covered by the worker tests; nothing to assert here.
+        report: (_error, level) => {
+            reports.push(level);
         },
         ...overrides,
     });
 
-    return { handler, queued, quarantined, actions };
+    return { handler, queued, quarantined, actions, reports };
 };
 
 const validSubmission = {
@@ -170,6 +173,7 @@ describe("createIntakeHandler", () => {
         await harness.handler(jsonPost(validSubmission));
 
         assert.deepEqual(harness.queued[0]?.flags, ["spam-check-unavailable"]);
+        assert.deepEqual(harness.reports, ["warning"]);
     });
 
     it("reports an error when the queue rejects the message", async () => {
@@ -184,6 +188,7 @@ describe("createIntakeHandler", () => {
         const result = await harness.handler(jsonPost(validSubmission));
 
         assert.equal(result.statusCode, 500);
+        assert.deepEqual(harness.reports, ["error"]);
     });
 
     it("rejects an unknown form", async () => {

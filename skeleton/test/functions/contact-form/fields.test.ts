@@ -79,6 +79,28 @@ describe("buildFieldsSchema", () => {
         assert.notEqual(errors.phone, undefined);
     });
 
+    // Whitespace runs ending in a character the pattern refuses are the classic way to make a
+    // regular expression backtrack for seconds; an anonymous POST can send one before any spam check.
+    it("rejects adversarial phone input without stalling", () => {
+        const started = performance.now();
+        const oversized = errorsFor({
+            name: "Jane",
+            email: "jane@example.com",
+            phone: `1${" ".repeat(65_000)}!`,
+            message: "Hello",
+        });
+        const withinLength = errorsFor({
+            name: "Jane",
+            email: "jane@example.com",
+            phone: `1${" ".repeat(150)}!`,
+            message: "Hello",
+        });
+
+        assert.ok(performance.now() - started < 1000);
+        assert.equal(oversized.phone, "Phone must be 200 characters or fewer");
+        assert.equal(withinLength.phone, "Enter a valid phone");
+    });
+
     it("drops keys the form does not define", () => {
         const result = schema.parse({
             name: "Jane",

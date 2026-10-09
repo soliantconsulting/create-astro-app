@@ -77,19 +77,25 @@ describe("createWorkerHandler", () => {
         assert.equal(harness.sent[0]?.subject, "Website contact form");
     });
 
-    it("acknowledges and reports an unreadable message", async () => {
+    it("keeps an unreadable message for the dead letter queue and reports it", async () => {
         const harness = createHarness(null);
         const result = await harness.handler(event(record("{not json", 1)));
 
-        assert.deepEqual(result.batchItemFailures, []);
-        assert.deepEqual(harness.reports, ["warning"]);
+        assert.deepEqual(result.batchItemFailures, [{ itemIdentifier: "message-1" }]);
+        assert.deepEqual(harness.reports, ["error"]);
     });
 
-    it("acknowledges and reports a permanent rejection", async () => {
-        const harness = createHarness(sesError("MessageRejected"));
+    // The SES sandbox answers an unverified sender or recipient with MessageRejected. Dropping it
+    // would lose a submission the visitor was told had been sent.
+    it("keeps a rejected message for the dead letter queue and reports it", async () => {
+        const rejection = Object.assign(
+            new Error("Email address is not verified. The following identities failed the check"),
+            { name: "MessageRejected" },
+        );
+        const harness = createHarness(rejection);
         const result = await harness.handler(event(record(JSON.stringify(message), 1)));
 
-        assert.deepEqual(result.batchItemFailures, []);
+        assert.deepEqual(result.batchItemFailures, [{ itemIdentifier: "message-1" }]);
         assert.deepEqual(harness.reports, ["error"]);
     });
 

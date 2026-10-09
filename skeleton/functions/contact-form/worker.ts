@@ -1,5 +1,6 @@
 import type { SQSBatchResponse, SQSEvent, SQSRecord } from "aws-lambda";
 import type { SQSBatchItemFailure } from "aws-lambda/trigger/sqs.js";
+import { match } from "ts-pattern";
 import { type EmailContext, type RenderedEmail, renderEmail } from "./email.js";
 import { contactMessageSchema } from "./message.js";
 import type { ReportError } from "./report.js";
@@ -16,7 +17,7 @@ export type WorkerDependencies = {
     maxReceiveCount: number;
 };
 
-type RecordOutcome = "done" | "retry";
+type RecordOutcome = "sent" | "retry";
 
 const parseBody = (body: string): unknown => {
     try {
@@ -26,33 +27,35 @@ const parseBody = (body: string): unknown => {
     }
 };
 
-const handleSendFailure = (
+const reportSendFailure = (
     error: unknown,
     receiveCount: number,
     dependencies: WorkerDependencies,
-): RecordOutcome => {
-    const errorClass = classifySendError(error);
+): void => {
+    match(classifySendError(error))
+        .with("permanent", () => {
+            console.error(
+                "SES rejected a contact form email; it will reach the dead letter queue",
+                {
+                    error,
+                },
+            );
+            dependencies.report(error, "error");
+        })
+        .with("configuration", () => {
+            console.error("SES configuration blocks sending, keeping the message", { error });
+            dependencies.report(error, "fatal");
+        })
+        .with("transient", () => {
+            if (receiveCount >= dependencies.maxReceiveCount) {
+                console.error("Contact form email failed its last attempt", { error });
+                dependencies.report(error, "error");
+                return;
+            }
 
-    if (errorClass === "permanent") {
-        console.error("SES permanently rejected a contact form email", { error });
-        dependencies.report(error, "error");
-        return "done";
-    }
-
-    if (errorClass === "configuration") {
-        console.error("SES configuration blocks sending, keeping the message", { error });
-        dependencies.report(error, "fatal");
-        return "retry";
-    }
-
-    if (receiveCount >= dependencies.maxReceiveCount) {
-        console.error("Contact form email failed its last attempt", { error });
-        dependencies.report(error, "error");
-        return "retry";
-    }
-
-    console.warn("Contact form email failed, will retry", { error, receiveCount });
-    return "retry";
+            console.warn("Contact form email failed, will retry", { error, receiveCount });
+        })
+        .exhaustive();
 };
 
 const processRecord = async (
@@ -62,12 +65,12 @@ const processRecord = async (
     const parsed = contactMessageSchema.safeParse(parseBody(record.body));
 
     if (!parsed.success) {
-        console.warn("Discarded an unreadable contact form message", {
+        console.error("Unreadable contact form message; it will reach the dead letter queue", {
             messageId: record.messageId,
             error: parsed.error,
         });
-        dependencies.report(parsed.error, "warning");
-        return "done";
+        dependencies.report(parsed.error, "error");
+        return "retry";
     }
 
     try {
@@ -77,20 +80,21 @@ const processRecord = async (
         });
     } catch (error) {
         const receiveCount = Number.parseInt(record.attributes.ApproximateReceiveCount, 10);
-        return handleSendFailure(error, receiveCount, dependencies);
+        reportSendFailure(error, receiveCount, dependencies);
+        return "retry";
     }
 
     console.info("Contact form email sent", { formId: parsed.data.formId });
-    return "done";
+    return "sent";
 };
 
 /**
  * Sends one queued contact form submission per record.
  *
- * Returns the failed records instead of throwing, so only those are retried. A permanent SES
- * rejection is acknowledged and reported: retrying cannot help and the message would never reach
- * the dead letter queue's alarm. A transient failure is reported only on its last attempt, since
- * the queue retries it on its own.
+ * A message is only acknowledged once its email is sent. Every failure, including ones that will
+ * never succeed, is returned as a batch item failure: the queue retries it and then moves it to the
+ * dead letter queue, which keeps it for 14 days and raises an alarm. Nothing a visitor submitted is
+ * deleted unsent. The error class only decides how loudly the failure is reported.
  */
 export const createWorkerHandler =
     (dependencies: WorkerDependencies) =>

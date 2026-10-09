@@ -195,9 +195,12 @@ export const createIntakeHandler =
         return match(verdict)
             .with({ kind: "pass" }, () => deliver([]))
             .with({ kind: "reject" }, ({ reason }) => quarantine(reason))
-            .with({ kind: "missing-token" }, async () =>
-                respond("javascript-required", wantsJson, form),
-            )
+            .with({ kind: "missing-token" }, async () => {
+                console.warn("Rejected a submission without a reCAPTCHA token", {
+                    formId: form.id,
+                });
+                return respond("javascript-required", wantsJson, form);
+            })
             .with({ kind: "unconfigured" }, () => deliver(["spam-check-not-configured"]))
             .with({ kind: "unavailable" }, ({ reason }) => {
                 console.error("reCAPTCHA verification unavailable, delivering flagged", { reason });
