@@ -31,9 +31,10 @@ const fieldId = (name: string): string => `${form.id}-${name}`;
     <input type="hidden" name="elapsedMs" value="" />
     <input type="hidden" name="recaptchaToken" value="" />
 
+    <div class="contact-form__fields">
     {
         form.fields.map((field) => (
-            <div class="contact-form__field">
+            <div class:list={["contact-form__field", { "contact-form__field--wide": field.type === "textarea" }]}>
                 <label for={fieldId(field.name)}>
                     {field.label}
                     {field.required ? (
@@ -64,6 +65,7 @@ const fieldId = (name: string): string => `${form.id}-${name}`;
             </div>
         ))
     }
+    </div>
 
     <Honeypot />
 
@@ -275,10 +277,25 @@ const fieldId = (name: string): string => `${form.id}-${name}`;
         max-width: var(--size-reading-width);
     }
 
+    .contact-form__fields {
+        display: grid;
+        gap: 1.25rem 1.5rem;
+    }
+
     .contact-form__field {
         display: flex;
         flex-direction: column;
         gap: 0.375rem;
+    }
+
+    @media (min-width: 48em) {
+        .contact-form__fields {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .contact-form__field--wide {
+            grid-column: 1 / -1;
+        }
     }
 
     .contact-form label {

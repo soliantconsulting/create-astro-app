@@ -96,6 +96,14 @@ for (const file of htmlFiles) {
         }
     }
 
+    // A2b no unset environment value reached the page, in links and attributes as well as text
+    if (html.includes("CHANGE-ME")) {
+        fail(
+            "A2b no unset configuration",
+            `${page} contains "CHANGE-ME": a value in cdk/src/env-*.ts was never filled in.`,
+        );
+    }
+
     // A6 the 404 page is real and noindexed; it is what lets CloudFront answer a true 404
     if (page === "/404.html") {
         if (!/<h1[^>]*>/i.test(html)) {
