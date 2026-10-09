@@ -263,8 +263,9 @@ const isVerifiedIdentity = async (ses: SESv2Client, identity: string): Promise<b
  *
  * A sandboxed account can only deliver to verified addresses, so without this the first real
  * submission is rejected. SES emails each newly requested address a link; nothing is delivered to
- * that address until someone clicks it. An address already awaiting verification gets no second
- * email, since SES has no resend. Does nothing once the account has production access.
+ * that address until someone clicks it. Creating an identity that already exists sends nothing, so
+ * an address still awaiting verification gets no second email from this run. Does nothing once
+ * the account has production access.
  */
 const verifySandboxRecipients = async (
     ses: SESv2Client,
@@ -303,7 +304,7 @@ const verifySandboxRecipients = async (
 
     if (stillPending.length > 0) {
         note(
-            `Still awaiting verification from an earlier request, so SES sent nothing new: ${stillPending.join(", ")}. If that link has expired, delete the identity in the SES console and create it again.`,
+            `Still awaiting verification from an earlier request, so SES sent nothing new: ${stillPending.join(", ")}. If that link has expired, resend it from the identity's page in the SES console.`,
         );
     }
 };
