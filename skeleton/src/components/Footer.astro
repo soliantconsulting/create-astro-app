@@ -1,0 +1,24 @@
+---
+import { Temporal } from "temporal-polyfill";
+import { siteName } from "../site.js";
+
+const year = Temporal.Now.plainDateISO().year;
+---
+
+<footer class="site-footer">
+    <div class="container">
+        <p>&copy; {year} {siteName}</p>
+    </div>
+</footer>
+
+<style>
+    .site-footer {
+        padding-block: 2rem;
+        background: var(--color-surface-alt);
+        color: var(--color-ink-muted);
+    }
+
+    .site-footer p {
+        margin: 0;
+    }
+</style>

@@ -1,0 +1,363 @@
+---
+import { findContactForm, recaptchaAction } from "../forms/contact-forms.js";
+import Honeypot from "./Honeypot.astro";
+
+type Props = {
+    formId: string;
+};
+
+const { formId } = Astro.props;
+const form = findContactForm(formId);
+
+if (form === undefined) {
+    throw new Error(`No contact form "${formId}" in src/forms/contact-forms.ts`);
+}
+
+const siteKey = import.meta.env.PUBLIC_RECAPTCHA_SITE_KEY ?? "";
+const fieldId = (name: string): string => `${form.id}-${name}`;
+---
+
+<form
+    class="contact-form"
+    method="post"
+    action="/api/contact"
+    novalidate
+    data-contact-form
+    data-recaptcha-site-key={siteKey}
+    data-recaptcha-action={recaptchaAction(form)}
+    data-success-path={form.successPath}
+>
+    <input type="hidden" name="form" value={form.id} />
+    <input type="hidden" name="elapsedMs" value="" />
+    <input type="hidden" name="recaptchaToken" value="" />
+
+    <div class="contact-form__fields">
+    {
+        form.fields.map((field) => (
+            <div class:list={["contact-form__field", { "contact-form__field--wide": field.type === "textarea" }]}>
+                <label for={fieldId(field.name)}>
+                    {field.label}
+                    {field.required ? (
+                        <span class="contact-form__required"> (required)</span>
+                    ) : null}
+                </label>
+                {field.type === "textarea" ? (
+                    <textarea
+                        id={fieldId(field.name)}
+                        name={field.name}
+                        rows="6"
+                        required={field.required}
+                        maxlength={field.maxLength ?? 5000}
+                        aria-describedby={`${fieldId(field.name)}-error`}
+                    />
+                ) : (
+                    <input
+                        id={fieldId(field.name)}
+                        name={field.name}
+                        type={field.type}
+                        required={field.required}
+                        autocomplete={field.autocomplete}
+                        maxlength={field.maxLength ?? 200}
+                        aria-describedby={`${fieldId(field.name)}-error`}
+                    />
+                )}
+                <p class="contact-form__error" id={`${fieldId(field.name)}-error`} hidden />
+            </div>
+        ))
+    }
+    </div>
+
+    <Honeypot />
+
+    <p class="contact-form__status" role="alert" data-form-status hidden></p>
+
+    <div>
+        <button type="submit" class="contact-form__submit">Send message</button>
+    </div>
+
+    {
+        siteKey !== "" && (
+            <p class="contact-form__notice">
+                This site is protected by reCAPTCHA and the Google{" "}
+                <a href="https://policies.google.com/privacy">Privacy Policy</a> and{" "}
+                <a href="https://policies.google.com/terms">Terms of Service</a> apply.
+            </p>
+        )
+    }
+
+    <noscript>
+        <p class="contact-form__notice">
+            This form needs JavaScript to protect against spam. Please enable it, or contact us
+            another way.
+        </p>
+    </noscript>
+</form>
+
+<script>
+    type Grecaptcha = {
+        ready: (callback: () => void) => void;
+        execute: (siteKey: string, options: { action: string }) => Promise<string>;
+    };
+
+    type FieldErrors = Record<string, string>;
+
+    type IntakeResponse = {
+        status: string;
+        errors?: FieldErrors;
+    };
+
+    declare global {
+        interface Window {
+            grecaptcha?: Grecaptcha;
+        }
+    }
+
+    const loadRecaptcha = (siteKey: string): void => {
+        if (document.querySelector("script[data-recaptcha]") !== null) {
+            return;
+        }
+
+        const script = document.createElement("script");
+        script.src = `https://www.google.com/recaptcha/api.js?render=${encodeURIComponent(siteKey)}`;
+        script.async = true;
+        script.dataset.recaptcha = "";
+        document.head.append(script);
+    };
+
+    // A token is valid for two minutes and only once, so it is minted at submit time, never on load.
+    const mintToken = (siteKey: string, action: string): Promise<string> =>
+        new Promise((resolve, reject) => {
+            const { grecaptcha } = window;
+
+            if (grecaptcha === undefined) {
+                reject(new Error("reCAPTCHA did not load"));
+                return;
+            }
+
+            grecaptcha.ready(() => {
+                grecaptcha.execute(siteKey, { action }).then(resolve, reject);
+            });
+        });
+
+    const setFieldValue = (form: HTMLFormElement, name: string, value: string): void => {
+        const input = form.elements.namedItem(name);
+
+        if (input instanceof HTMLInputElement) {
+            input.value = value;
+        }
+    };
+
+    const clearErrors = (form: HTMLFormElement): void => {
+        for (const message of form.querySelectorAll<HTMLElement>(".contact-form__error")) {
+            message.hidden = true;
+            message.textContent = "";
+        }
+
+        for (const control of form.querySelectorAll("[aria-invalid]")) {
+            control.removeAttribute("aria-invalid");
+        }
+    };
+
+    const showFieldErrors = (form: HTMLFormElement, errors: FieldErrors): void => {
+        for (const [name, message] of Object.entries(errors)) {
+            const control = form.elements.namedItem(name);
+
+            if (!(control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement)) {
+                continue;
+            }
+
+            control.setAttribute("aria-invalid", "true");
+            const errorElement = document.getElementById(`${control.id}-error`);
+
+            if (errorElement !== null) {
+                errorElement.textContent = message;
+                errorElement.hidden = false;
+            }
+        }
+    };
+
+    const showStatus = (status: HTMLElement, message: string): void => {
+        status.textContent = message;
+        status.hidden = false;
+    };
+
+    const fieldErrorsFromBrowser = (form: HTMLFormElement): FieldErrors => {
+        const errors: FieldErrors = {};
+
+        for (const control of form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+            "input:not([type=hidden]), textarea",
+        )) {
+            if (!control.validity.valid && control.name !== "") {
+                errors[control.name] = control.validationMessage;
+            }
+        }
+
+        return errors;
+    };
+
+    const submitForm = async (form: HTMLFormElement, status: HTMLElement): Promise<void> => {
+        const { recaptchaSiteKey = "", recaptchaAction = "", successPath = "/" } = form.dataset;
+
+        if (recaptchaSiteKey !== "") {
+            setFieldValue(form, "recaptchaToken", await mintToken(recaptchaSiteKey, recaptchaAction));
+        }
+
+        // Time on the page as the browser measures it, so a fast or slow device clock cannot
+        // make a person look like a bot.
+        setFieldValue(form, "elapsedMs", String(Math.round(performance.now())));
+
+        const response = await fetch(form.action, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify(Object.fromEntries(new FormData(form))),
+        });
+
+        if (response.ok) {
+            window.location.assign(successPath);
+            return;
+        }
+
+        const result: IntakeResponse | null = await response.json().catch(() => null);
+
+        if (result?.errors !== undefined) {
+            showFieldErrors(form, result.errors);
+            showStatus(status, "Please correct the highlighted fields.");
+            return;
+        }
+
+        showStatus(status, "We could not send your message. Please try again in a moment.");
+    };
+
+    for (const form of document.querySelectorAll<HTMLFormElement>("form[data-contact-form]")) {
+        const status = form.querySelector<HTMLElement>("[data-form-status]");
+        const submit = form.querySelector<HTMLButtonElement>("button[type=submit]");
+
+        if (status === null || submit === null) {
+            continue;
+        }
+
+        if (form.dataset.recaptchaSiteKey !== undefined && form.dataset.recaptchaSiteKey !== "") {
+            loadRecaptcha(form.dataset.recaptchaSiteKey);
+        }
+
+        form.addEventListener("submit", (event) => {
+            event.preventDefault();
+            clearErrors(form);
+            status.hidden = true;
+
+            const browserErrors = fieldErrorsFromBrowser(form);
+
+            if (Object.keys(browserErrors).length > 0) {
+                showFieldErrors(form, browserErrors);
+                showStatus(status, "Please correct the highlighted fields.");
+                return;
+            }
+
+            submit.disabled = true;
+
+            submitForm(form, status)
+                .catch(() => {
+                    showStatus(
+                        status,
+                        "We could not send your message. Please try again in a moment.",
+                    );
+                })
+                .finally(() => {
+                    submit.disabled = false;
+                });
+        });
+    }
+</script>
+
+<style>
+    .contact-form {
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+        max-width: var(--size-reading-width);
+    }
+
+    .contact-form__fields {
+        display: grid;
+        gap: 1.25rem 1.5rem;
+    }
+
+    .contact-form__field {
+        display: flex;
+        flex-direction: column;
+        gap: 0.375rem;
+    }
+
+    @media (min-width: 48em) {
+        .contact-form__fields {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .contact-form__field--wide {
+            grid-column: 1 / -1;
+        }
+    }
+
+    .contact-form label {
+        font-weight: 600;
+    }
+
+    .contact-form__required {
+        font-weight: 400;
+        color: var(--color-ink-muted);
+    }
+
+    .contact-form input,
+    .contact-form textarea {
+        font: inherit;
+        padding: 0.625rem 0.75rem;
+        border: 1px solid var(--color-border);
+        border-radius: var(--size-radius);
+        background: var(--color-surface);
+        color: var(--color-ink);
+    }
+
+    .contact-form [aria-invalid="true"] {
+        border-color: var(--color-error);
+    }
+
+    .contact-form__error,
+    .contact-form__status {
+        margin: 0;
+        color: var(--color-error);
+    }
+
+    .contact-form__submit {
+        font: inherit;
+        font-weight: 600;
+        width: 100%;
+        padding: 0.75rem 1.25rem;
+        border: 2px solid var(--color-brand);
+        border-radius: var(--size-radius);
+        background: var(--color-brand);
+        color: var(--color-surface);
+        cursor: pointer;
+    }
+
+    .contact-form__submit:disabled {
+        opacity: 0.6;
+        cursor: progress;
+    }
+
+    @media (min-width: 36em) {
+        .contact-form__submit {
+            width: auto;
+        }
+    }
+
+    .contact-form__notice {
+        margin: 0;
+        font-size: 0.875rem;
+        color: var(--color-ink-muted);
+    }
+
+    /* Google allows hiding the floating badge when the attribution text above is shown instead. */
+    :global(.grecaptcha-badge) {
+        visibility: hidden;
+    }
+</style>

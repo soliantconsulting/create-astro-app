@@ -1,0 +1,9 @@
+sideEffectsCache: false
+allowBuilds:
+  '@biomejs/biome': true
+  '@sentry/cli': true
+  '@swc/core': true
+  browser-tabs-lock: false
+  esbuild: true
+  lefthook: true
+  sharp: true

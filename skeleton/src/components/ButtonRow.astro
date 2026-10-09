@@ -1,0 +1,26 @@
+---
+/**
+ * Buttons stack block-level at phone widths and sit inline from 36em up. Put every group of
+ * buttons in this wrapper so the rule is structural rather than something each page remembers.
+ */
+---
+
+<div class="button-row">
+    <slot />
+</div>
+
+<style>
+    .button-row {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+
+    @media (min-width: 36em) {
+        .button-row {
+            flex-direction: row;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+    }
+</style>

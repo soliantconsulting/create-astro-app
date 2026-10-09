@@ -1,0 +1,279 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { ArnFormat, CfnOutput, Duration, Fn, RemovalPolicy, Stack } from "aws-cdk-lib";
+import { HttpApi, HttpMethod } from "aws-cdk-lib/aws-apigatewayv2";
+import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
+import {
+    Alarm,
+    ComparisonOperator,
+    type IMetric,
+    TreatMissingData,
+} from "aws-cdk-lib/aws-cloudwatch";
+import { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
+import { PolicyStatement } from "aws-cdk-lib/aws-iam";
+import { Architecture, LoggingFormat, Runtime } from "aws-cdk-lib/aws-lambda";
+import { SqsEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
+import { NodejsFunction, type NodejsFunctionProps } from "aws-cdk-lib/aws-lambda-nodejs";
+import { FilterPattern, LogGroup, MetricFilter, RetentionDays } from "aws-cdk-lib/aws-logs";
+import { BlockPublicAccess, Bucket, BucketEncryption } from "aws-cdk-lib/aws-s3";
+import { Topic } from "aws-cdk-lib/aws-sns";
+import { EmailSubscription } from "aws-cdk-lib/aws-sns-subscriptions";
+import { Queue, QueueEncryption } from "aws-cdk-lib/aws-sqs";
+import { Construct } from "constructs";
+
+export type ContactFormProps = {
+    siteName: string;
+    /** Hostnames a reCAPTCHA token may have been minted on. */
+    hostnames: string[];
+    recipients: string[];
+    senderAddress: string;
+    /** IANA time zone the notification emails show the submission time in. */
+    timeZone: string;
+    alarmEmail: string | null;
+    recaptchaSecretName: string;
+    /** The site key the pages were built with; empty when the build has none. */
+    recaptchaSiteKey: string;
+    {%- if sentry %}
+    sentryDsn: string;
+    sentryEnvironment: string;
+    {%- endif %}
+};
+
+const projectRoot = fileURLToPath(new URL("../../", import.meta.url));
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Attempts before a message moves to the dead letter queue. The worker reads the same value so it
+// reports a failure on the final attempt.
+const MAX_RECEIVE_COUNT = 5;
+const WORKER_TIMEOUT = Duration.seconds(30);
+// reCAPTCHA v3 scores below this are quarantined. Without billing on the Google Cloud project,
+// scores arrive as 0.1, 0.3, 0.7 or 0.9 only, so any value between 0.3 and 0.7 is the same policy.
+const RECAPTCHA_MIN_SCORE = "0.5";
+
+/**
+ * The contact form backend: an API route that validates a submission and queues it, and a worker
+ * that emails it through SES. Submissions that fail a spam check go to a quarantine bucket.
+ *
+ * Expects the sending domain to be a verified SES identity in this account and region; the
+ * scaffolding CLI creates it and its DKIM records.
+ */
+export class ContactForm extends Construct {
+    public readonly apiDomainName: string;
+
+    public constructor(scope: Construct, id: string, props: ContactFormProps) {
+        super(scope, id);
+
+        const addresses = [
+            props.senderAddress,
+            ...props.recipients,
+            ...(props.alarmEmail === null ? [] : [props.alarmEmail]),
+        ];
+
+        for (const address of addresses) {
+            if (!emailPattern.test(address)) {
+                throw new Error(
+                    `Contact form address "${address}" is not an email address. Fill in every CHANGE-ME in cdk/src/env-*.ts before deploying.`,
+                );
+            }
+        }
+
+        const stack = Stack.of(this);
+
+        const deadLetterQueue = new Queue(this, "DeadLetterQueue", {
+            encryption: QueueEncryption.SQS_MANAGED,
+            retentionPeriod: Duration.days(14),
+        });
+
+        const queue = new Queue(this, "Queue", {
+            encryption: QueueEncryption.SQS_MANAGED,
+            visibilityTimeout: Duration.seconds(WORKER_TIMEOUT.toSeconds() * 6),
+            deadLetterQueue: { queue: deadLetterQueue, maxReceiveCount: MAX_RECEIVE_COUNT },
+        });
+
+        const quarantineBucket = new Bucket(this, "QuarantineBucket", {
+            blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+            encryption: BucketEncryption.S3_MANAGED,
+            enforceSSL: true,
+            lifecycleRules: [{ expiration: Duration.days(30) }],
+            removalPolicy: RemovalPolicy.DESTROY,
+            autoDeleteObjects: true,
+        });
+
+        const sharedFunctionProps: NodejsFunctionProps = {
+            handler: "main",
+            projectRoot,
+            depsLockFilePath: path.join(projectRoot, "pnpm-lock.yaml"),
+            runtime: Runtime.NODEJS_24_X,
+            architecture: Architecture.ARM_64,
+            memorySize: 256,
+            loggingFormat: LoggingFormat.JSON,
+            bundling: { minify: true, sourceMap: true },
+        };
+
+        const sharedEnvironment = {
+            NODE_OPTIONS: "--enable-source-maps",
+            {%- if sentry %}
+            SENTRY_DSN: props.sentryDsn,
+            SENTRY_ENVIRONMENT: props.sentryEnvironment,
+            ...(process.env.BITBUCKET_COMMIT ? { SENTRY_RELEASE: process.env.BITBUCKET_COMMIT } : {}),
+            {%- endif %}
+        };
+
+        const intakeLogGroup = new LogGroup(this, "IntakeLogGroup", {
+            retention: RetentionDays.THREE_MONTHS,
+            removalPolicy: RemovalPolicy.DESTROY,
+        });
+
+        const intake = new NodejsFunction(this, "IntakeFunction", {
+            ...sharedFunctionProps,
+            entry: path.join(projectRoot, "functions/contact-form/intake-lambda.ts"),
+            timeout: Duration.seconds(10),
+            logGroup: intakeLogGroup,
+            environment: {
+                ...sharedEnvironment,
+                QUEUE_URL: queue.queueUrl,
+                QUARANTINE_BUCKET: quarantineBucket.bucketName,
+                RECAPTCHA_SECRET_NAME: props.recaptchaSecretName,
+                RECAPTCHA_SITE_KEY: props.recaptchaSiteKey,
+                RECAPTCHA_MIN_SCORE,
+                ALLOWED_HOSTNAMES: props.hostnames.join(","),
+            },
+        });
+
+        queue.grantSendMessages(intake);
+        quarantineBucket.grantPut(intake);
+        intake.addToRolePolicy(
+            new PolicyStatement({
+                actions: ["secretsmanager:GetSecretValue"],
+                resources: [
+                    stack.formatArn({
+                        service: "secretsmanager",
+                        resource: "secret",
+                        resourceName: `${props.recaptchaSecretName}-*`,
+                        arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+                    }),
+                ],
+            }),
+        );
+
+        const workerLogGroup = new LogGroup(this, "WorkerLogGroup", {
+            retention: RetentionDays.THREE_MONTHS,
+            removalPolicy: RemovalPolicy.DESTROY,
+        });
+
+        const worker = new NodejsFunction(this, "WorkerFunction", {
+            ...sharedFunctionProps,
+            entry: path.join(projectRoot, "functions/contact-form/worker-lambda.ts"),
+            timeout: WORKER_TIMEOUT,
+            logGroup: workerLogGroup,
+            environment: {
+                ...sharedEnvironment,
+                SENDER_ADDRESS: props.senderAddress,
+                RECIPIENTS: props.recipients.join(","),
+                SITE_NAME: props.siteName,
+                TIME_ZONE: props.timeZone,
+                MAX_RECEIVE_COUNT: String(MAX_RECEIVE_COUNT),
+            },
+        });
+
+        worker.addEventSource(
+            new SqsEventSource(queue, {
+                batchSize: 1,
+                reportBatchItemFailures: true,
+                maxConcurrency: 2,
+            }),
+        );
+
+        const domainOf = (address: string): string => address.slice(address.indexOf("@") + 1);
+        const identityArn = (identity: string): string =>
+            stack.formatArn({ service: "ses", resource: "identity", resourceName: identity });
+
+        worker.addToRolePolicy(
+            new PolicyStatement({
+                actions: ["ses:SendEmail"],
+                // The sending identity, plus each recipient as an address or a domain identity: while
+                // the account is in the SES sandbox, SES also authorizes the recipients' identities.
+                resources: [
+                    ...new Set(
+                        [props.senderAddress, ...props.recipients].flatMap((address) => [
+                            identityArn(address),
+                            identityArn(domainOf(address)),
+                        ]),
+                    ),
+                ],
+            }),
+        );
+
+        const api = new HttpApi(this, "Api", { createDefaultStage: false });
+
+        api.addStage("DefaultStage", {
+            stageName: "$default",
+            autoDeploy: true,
+            throttle: { rateLimit: 5, burstLimit: 10 },
+        });
+
+        api.addRoutes({
+            path: "/api/contact",
+            methods: [HttpMethod.POST],
+            integration: new HttpLambdaIntegration("IntakeIntegration", intake),
+        });
+
+        this.apiDomainName = Fn.select(2, Fn.split("/", api.apiEndpoint));
+
+        const alarmTopic = new Topic(this, "AlarmTopic");
+
+        if (props.alarmEmail !== null) {
+            alarmTopic.addSubscription(new EmailSubscription(props.alarmEmail));
+        }
+
+        const alarmAction = new SnsAction(alarmTopic);
+
+        const addAlarm = (alarmId: string, description: string, metric: IMetric): void => {
+            new Alarm(this, alarmId, {
+                alarmDescription: description,
+                metric,
+                threshold: 0,
+                comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
+                evaluationPeriods: 1,
+                treatMissingData: TreatMissingData.NOT_BREACHING,
+            }).addAlarmAction(alarmAction);
+        };
+
+        const errorLogCount = (filterId: string, logGroup: LogGroup, metricName: string): IMetric =>
+            new MetricFilter(this, filterId, {
+                logGroup,
+                filterPattern: FilterPattern.stringValue("$.level", "=", "ERROR"),
+                metricNamespace: `${stack.stackName}/ContactForm`,
+                metricName,
+                metricValue: "1",
+            }).metric({ period: Duration.minutes(5), statistic: "Sum" });
+
+        // The dead letter alarm is the one that fires when the worker never ran at all (timeout,
+        // crash during start-up, IAM change). Keep it even though the worker also reports errors.
+        addAlarm(
+            "DeadLetterAlarm",
+            "A contact form submission could not be emailed and is waiting in the dead letter queue.",
+            deadLetterQueue.metricApproximateNumberOfMessagesVisible({
+                period: Duration.minutes(5),
+                statistic: "Maximum",
+            }),
+        );
+        addAlarm(
+            "IntakeErrorAlarm",
+            "The contact form intake logged an error: a submission could not be queued, or spam checking is unavailable.",
+            errorLogCount("IntakeErrorFilter", intakeLogGroup, "IntakeErrors"),
+        );
+        addAlarm(
+            "IntakeCrashAlarm",
+            "The contact form intake function failed to run.",
+            intake.metricErrors({ period: Duration.minutes(5), statistic: "Sum" }),
+        );
+        addAlarm(
+            "WorkerErrorAlarm",
+            "The contact form worker logged an error: SES rejected a message or is misconfigured.",
+            errorLogCount("WorkerErrorFilter", workerLogGroup, "WorkerErrors"),
+        );
+
+        new CfnOutput(this, "QuarantineBucketName", { value: quarantineBucket.bucketName });
+    }
+}

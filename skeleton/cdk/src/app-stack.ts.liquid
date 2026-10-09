@@ -1,0 +1,344 @@
+import { execSync } from "node:child_process";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+    AssetHashType,
+    CfnOutput,
+    DockerImage,
+    Duration,
+    RemovalPolicy,
+    Size,
+    Stack,
+    type StackProps,
+} from "aws-cdk-lib";
+import { Certificate } from "aws-cdk-lib/aws-certificatemanager";
+import {
+    {%- if contactForm %}
+    AllowedMethods,
+    {%- endif %}
+    CachePolicy,
+    Distribution,
+    Function as CloudFrontFunction,
+    FunctionCode,
+    FunctionEventType,
+    HeadersFrameOption,
+    HeadersReferrerPolicy,
+    HttpVersion,
+    {%- if contactForm %}
+    OriginRequestPolicy,
+    {%- endif %}
+    type ResponseCustomHeader,
+    ResponseHeadersPolicy,
+    ViewerProtocolPolicy,
+} from "aws-cdk-lib/aws-cloudfront";
+import { {% if contactForm %}HttpOrigin, {% endif %}S3BucketOrigin } from "aws-cdk-lib/aws-cloudfront-origins";
+import { LogGroup, RetentionDays } from "aws-cdk-lib/aws-logs";
+import { BlockPublicAccess, Bucket } from "aws-cdk-lib/aws-s3";
+import { BucketDeployment, CacheControl, Source } from "aws-cdk-lib/aws-s3-deployment";
+import type { Construct } from "constructs";
+import { copySync } from "fs-extra/esm";
+{%- if contactForm %}
+import { ContactForm, type ContactFormProps } from "./contact-form.js";
+{%- endif %}
+
+type BuildEnv = Record<string, string>;
+
+const projectRoot = fileURLToPath(new URL("../../", import.meta.url));
+
+type AppStackProps = StackProps & {
+    certificateArn: string;
+    domainName: string;
+    /** Only production may be crawled. Every other environment answers with X-Robots-Tag: noindex. */
+    allowIndexing: boolean;
+    buildEnv: BuildEnv;
+    {%- if contactForm %}
+    contactForm: Omit<ContactFormProps, "hostnames" | "recaptchaSiteKey">;
+    {%- endif %}
+};
+
+export class AppStack extends Stack {
+    public constructor(scope: Construct, id: string, props: AppStackProps) {
+        super(scope, id, props);
+
+        const websiteBucket = new Bucket(this, "WebsiteBucket", {
+            autoDeleteObjects: true,
+            blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+            removalPolicy: RemovalPolicy.DESTROY,
+        });
+
+        const certificate = Certificate.fromCertificateArn(
+            this,
+            "Certificate",
+            props.certificateArn,
+        );
+
+        // Legacy URLs answer with a 301 to their replacement. Keys are matched lowercased because
+        // a site moving off Windows hosting has been served case-insensitively, and links to it
+        // use whatever case their authors typed.
+        const redirects = Object.fromEntries(
+            Object.entries(
+                JSON.parse(readFileSync(path.join(projectRoot, "src/seo/redirects.json"), "utf-8")),
+            ).map(([from, to]) => [from.toLowerCase(), to]),
+        );
+
+        // Astro builds /about/ as /about/index.html, and S3 behind Origin Access Control does no
+        // directory-index resolution, so clean URLs are mapped to their index.html at the edge.
+        const viewerRequestCode = `
+var redirects = ${JSON.stringify(redirects)};
+
+function queryString(querystring) {
+    var parts = [];
+
+    for (var name in querystring) {
+        var entry = querystring[name];
+        var values = entry.multiValue ? entry.multiValue : [entry];
+
+        for (var i = 0; i < values.length; i++) {
+            parts.push(values[i].value === "" ? name : name + "=" + values[i].value);
+        }
+    }
+
+    return parts.join("&");
+}
+
+function withQuery(target, querystring) {
+    var query = queryString(querystring);
+
+    if (query === "") {
+        return target;
+    }
+
+    var hashIndex = target.indexOf("#");
+    var base = hashIndex === -1 ? target : target.slice(0, hashIndex);
+    var hash = hashIndex === -1 ? "" : target.slice(hashIndex);
+
+    return base + (base.indexOf("?") === -1 ? "?" : "&") + query + hash;
+}
+
+function handler(event) {
+    var request = event.request;
+    var uri = request.uri;
+    var target = redirects[uri.toLowerCase()];
+
+    if (target !== undefined) {
+        return {
+            statusCode: 301,
+            statusDescription: "Moved Permanently",
+            headers: { location: { value: withQuery(target, request.querystring) } },
+        };
+    }
+
+    if (uri.endsWith("/")) {
+        request.uri = uri + "index.html";
+    } else if (!uri.includes(".")) {
+        request.uri = uri + "/index.html";
+    }
+
+    return request;
+}
+`;
+
+        // CloudFront rejects function code over 10 KB, but only when the deploy reaches it. A few
+        // hundred redirects is enough to get there.
+        const viewerRequestBytes = Buffer.byteLength(viewerRequestCode, "utf-8");
+
+        if (viewerRequestBytes > 9_500) {
+            throw new Error(
+                `src/seo/redirects.json makes the CloudFront viewer-request function ${viewerRequestBytes} bytes; CloudFront allows 10,240. Move the redirect map into a CloudFront KeyValueStore.`,
+            );
+        }
+
+        const directoryIndex = new CloudFrontFunction(this, "DirectoryIndex", {
+            code: FunctionCode.fromInline(viewerRequestCode),
+        });
+
+        const robotsHeaders: ResponseCustomHeader[] = props.allowIndexing
+            ? []
+            : [{ header: "X-Robots-Tag", value: "noindex, nofollow", override: true }];
+
+        const securityHeaders = {
+            strictTransportSecurity: {
+                accessControlMaxAge: Duration.days(365),
+                includeSubdomains: true,
+                override: true,
+            },
+            contentTypeOptions: { override: true },
+            frameOptions: { frameOption: HeadersFrameOption.DENY, override: true },
+            referrerPolicy: {
+                referrerPolicy: HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN,
+                override: true,
+            },
+        };
+
+        // Only files under /_astro/ carry a content hash in their name, so only they may be cached
+        // as immutable. Everything else is regenerated on every build and must revalidate.
+        const immutableAssetHeaders = new ResponseHeadersPolicy(this, "ImmutableAssetHeaders", {
+            customHeadersBehavior: {
+                customHeaders: [
+                    {
+                        header: "Cache-Control",
+                        value: "public, max-age=31536000, immutable",
+                        override: true,
+                    },
+                    ...robotsHeaders,
+                ],
+            },
+            securityHeadersBehavior: securityHeaders,
+        });
+
+        const documentHeaders = new ResponseHeadersPolicy(this, "DocumentHeaders", {
+            customHeadersBehavior: {
+                customHeaders: [
+                    {
+                        header: "Cache-Control",
+                        value: "public, max-age=0, must-revalidate",
+                        override: true,
+                    },
+                    ...robotsHeaders,
+                ],
+            },
+            securityHeadersBehavior: securityHeaders,
+        });
+
+        const origin = S3BucketOrigin.withOriginAccessControl(websiteBucket);
+        {%- if contactForm %}
+
+        const contactForm = new ContactForm(this, "ContactForm", {
+            ...props.contactForm,
+            hostnames: [props.domainName],
+            recaptchaSiteKey: props.buildEnv.PUBLIC_RECAPTCHA_SITE_KEY ?? "",
+        });
+        {%- endif %}
+
+        const distribution = new Distribution(this, "Distribution", {
+            certificate,
+            domainNames: [props.domainName],
+            defaultBehavior: {
+                origin,
+                cachePolicy: CachePolicy.CACHING_OPTIMIZED,
+                responseHeadersPolicy: documentHeaders,
+                viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                functionAssociations: [
+                    {
+                        function: directoryIndex,
+                        eventType: FunctionEventType.VIEWER_REQUEST,
+                    },
+                ],
+            },
+            additionalBehaviors: {
+                "/_astro/*": {
+                    origin,
+                    cachePolicy: CachePolicy.CACHING_OPTIMIZED,
+                    responseHeadersPolicy: immutableAssetHeaders,
+                    viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                },
+                {%- if contactForm %}
+                "/api/*": {
+                    origin: new HttpOrigin(contactForm.apiDomainName),
+                    allowedMethods: AllowedMethods.ALLOW_ALL,
+                    cachePolicy: CachePolicy.CACHING_DISABLED,
+                    originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+                    viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                },
+                {%- endif %}
+            },
+            defaultRootObject: "index.html",
+            httpVersion: HttpVersion.HTTP2_AND_3,
+            // A missing page returns a real 404 with the styled 404 document, never the homepage
+            // at HTTP 200. 403 is included because S3 behind Origin Access Control answers a
+            // missing key with AccessDenied.
+            errorResponses: [
+                {
+                    httpStatus: 404,
+                    responseHttpStatus: 404,
+                    responsePagePath: "/404.html",
+                    ttl: Duration.minutes(1),
+                },
+                {
+                    httpStatus: 403,
+                    responseHttpStatus: 404,
+                    responsePagePath: "/404.html",
+                    ttl: Duration.minutes(1),
+                },
+            ],
+        });
+
+        // sld-dns-control finds the CNAME target by a stack output whose key ends with this exact
+        // name. Renaming it breaks `point-staging-domain`.
+        new CfnOutput(this, "DistributionDomainName", { value: distribution.domainName });
+
+        const buildEnv: BuildEnv = {
+            ...props.buildEnv,
+            PUBLIC_SITE_URL: `https://${props.domainName}`,
+            PUBLIC_ALLOW_INDEXING: String(props.allowIndexing),
+        };
+
+        const source = Source.asset(projectRoot, {
+            exclude: ["cdk", "node_modules", ".astro"],
+            bundling: {
+                image: DockerImage.fromRegistry("public.ecr.aws/docker/library/alpine:latest"),
+                command: ["sh", "-c", 'echo "Docker build not supported." && exit 1'],
+                local: {
+                    tryBundle: (outputDir: string): boolean => {
+                        execSync("pnpm build", {
+                            stdio: ["ignore", process.stderr, process.stdout],
+                            cwd: projectRoot,
+                            env: { ...process.env, ...buildEnv },
+                        });
+
+                        const distPath = path.join(projectRoot, "dist");
+
+                        // Never hand an empty or partial build to the deployment below: it prunes,
+                        // so whatever is missing here is deleted from the live site. Throwing
+                        // rather than returning false keeps CDK from falling back to Docker.
+                        if (!existsSync(distPath)) {
+                            throw new Error("Build produced no dist directory.");
+                        }
+
+                        if (!existsSync(path.join(distPath, "404.html"))) {
+                            throw new Error(
+                                "Build produced no 404.html, which the distribution serves for every unknown URL.",
+                            );
+                        }
+
+                        if (!readdirSync(distPath).includes("index.html")) {
+                            throw new Error("Build produced no index.html at the root of dist.");
+                        }
+
+                        copySync(distPath, outputDir);
+
+                        return true;
+                    },
+                },
+                environment: buildEnv,
+            },
+            // OUTPUT because the source directory is the whole project. Only changed objects reach
+            // the website bucket, since the sync itself is incremental.
+            assetHashType: AssetHashType.OUTPUT,
+        });
+
+        const deploymentLogGroup = new LogGroup(this, "DeploymentLogGroup", {
+            retention: RetentionDays.ONE_WEEK,
+        });
+
+        new BucketDeployment(this, "BucketDeployment", {
+            destinationBucket: websiteBucket,
+            logGroup: deploymentLogGroup,
+            // Deletes pages that were removed from the site. Safe only because tryBundle refuses
+            // to hand over an empty or partial build.
+            prune: true,
+            cacheControl: [CacheControl.fromString("public, max-age=0, must-revalidate")],
+            sources: [source],
+            // One invalidation of /* per deploy. Per-path invalidation is billed past the first
+            // 1,000 paths a month, which a large site reaches in a single deploy.
+            distribution,
+            distributionPaths: ["/*"],
+            waitForDistributionInvalidation: false,
+            memoryLimit: 1024,
+            // The deployment Lambda unzips the whole site into /tmp; 512 MiB is not enough once a
+            // site has real images.
+            ephemeralStorageSize: Size.gibibytes(2),
+        });
+    }
+}

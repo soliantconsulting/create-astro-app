@@ -1,0 +1,22 @@
+---
+/**
+ * Lets a wide table scroll inside its container instead of the page. The role, tabindex and label
+ * are what make the scroll region reachable from the keyboard (WCAG 2.1.1).
+ */
+type Props = {
+    label: string;
+};
+
+const { label } = Astro.props;
+---
+
+<div role="region" aria-label={label} tabindex="0" class="table-scroller">
+    <slot />
+</div>
+
+<style>
+    .table-scroller {
+        width: 100%;
+        overflow-x: auto;
+    }
+</style>

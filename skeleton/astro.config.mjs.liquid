@@ -1,0 +1,39 @@
+// @ts-check
+import react from "@astrojs/react";
+{%- if sentry %}
+import sentry from "@sentry/astro";
+{%- endif %}
+import { defineConfig } from "astro/config";
+
+export default defineConfig({
+    // The deployment pipeline sets PUBLIC_SITE_URL per environment; canonical URLs, the sitemap
+    // and robots.txt are all built from it.
+    site: process.env.PUBLIC_SITE_URL ?? "http://localhost:4321",
+    build: {
+        // Emits /about/index.html, which the CloudFront viewer-request function resolves.
+        format: "directory",
+    },
+    integrations: [
+        // React islands with MUI, for the parts of a page that need to be interactive. Pages and
+        // components are .astro and ship no JavaScript by default.
+        react({ include: ["**/components/**/*.tsx"] }),
+        {%- if sentry %}
+        // The DSN lives in sentry.client.config.js; passing it here is deprecated.
+        sentry({
+            sourceMapsUploadOptions: {
+                project: "{{sentry.projectSlug}}",
+                org: "{{sentry.org}}",
+            },
+        }),
+        {%- endif %}
+    ],
+    devToolbar: { enabled: false },
+    {%- if contactForm %}
+    vite: {
+        server: {
+            // `pnpm dev:contact` serves the contact form intake locally.
+            proxy: { "/api": "http://localhost:4399" },
+        },
+    },
+    {%- endif %}
+});

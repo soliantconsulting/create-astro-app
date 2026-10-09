@@ -1,0 +1,72 @@
+---
+import Footer from "../components/Footer.astro";
+import Header from "../components/Header.astro";
+import { breadcrumbTrail, canonicalUrl, getRoute } from "../seo/routes.js";
+import { siteName } from "../site.js";
+import "../styles/global.css";
+import { tokenCss } from "../theme/tokens.js";
+
+type Props = {
+    /**
+     * The page's registered path. There is no title or description prop: the registry in
+     * src/seo/routes.ts supplies both, which is what keeps them unique across the site.
+     */
+    path: string;
+};
+
+const { path } = Astro.props;
+const site = Astro.site ?? Astro.url;
+const route = getRoute(path);
+const canonical = canonicalUrl(route.path, site);
+const trail = breadcrumbTrail(route.path);
+
+const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: trail.map((item, index) => ({
+        "@type": "ListItem",
+        position: index + 1,
+        name: item.navLabel ?? item.title,
+        item: canonicalUrl(item.path, site),
+    })),
+};
+---
+
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <script is:inline>document.documentElement.classList.add("js");</script>
+        <title>{route.title}</title>
+        <meta name="description" content={route.description} />
+        <link rel="canonical" href={canonical} />
+        {!route.indexable && <meta name="robots" content="noindex, follow" />}
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content={siteName} />
+        <meta property="og:title" content={route.title} />
+        <meta property="og:description" content={route.description} />
+        <meta property="og:url" content={canonical} />
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <link rel="sitemap" href={new URL("/sitemap.xml", site).href} />
+        <style is:global set:html={tokenCss()}></style>
+        {
+            trail.length > 1 && (
+                <script
+                    is:inline
+                    type="application/ld+json"
+                    set:html={JSON.stringify(breadcrumbJsonLd)}
+                />
+            )
+        }
+        <slot name="head" />
+    </head>
+    <body>
+        <a href="#main" class="skip-link">Skip to content</a>
+        <Header currentPath={route.path} />
+        <main id="main">
+            <slot />
+        </main>
+        <Footer />
+    </body>
+</html>

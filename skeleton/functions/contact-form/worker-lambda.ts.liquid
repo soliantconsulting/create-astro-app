@@ -1,0 +1,62 @@
+import { SendEmailCommand, SESv2Client } from "@aws-sdk/client-sesv2";
+import { z } from "zod";
+{%- if sentry %}
+import { reportError, wrapHandler } from "./sentry.js";
+{%- endif %}
+import { createWorkerHandler } from "./worker.js";
+
+const configSchema = z.object({
+    SENDER_ADDRESS: z.email(),
+    RECIPIENTS: z
+        .string()
+        .transform((value) => value.split(",").map((address) => address.trim()))
+        .pipe(z.array(z.email()).min(1)),
+    SITE_NAME: z.string().min(1),
+    TIME_ZONE: z.string().min(1),
+    MAX_RECEIVE_COUNT: z.coerce.number().pipe(z.int().positive()),
+});
+
+const config = configSchema.parse(process.env);
+const ses = new SESv2Client({});
+
+// A display name is only safe unencoded when it is plain printable ASCII with no quotes.
+const fromAddress = /^[\x20-\x7e]+$/.test(config.SITE_NAME) && !/["\\]/.test(config.SITE_NAME)
+    ? `"${config.SITE_NAME}" <${config.SENDER_ADDRESS}>`
+    : config.SENDER_ADDRESS;
+
+const handler = createWorkerHandler({
+    send: async (email) => {
+        await ses.send(
+            new SendEmailCommand({
+                FromEmailAddress: fromAddress,
+                Destination: { ToAddresses: config.RECIPIENTS },
+                ReplyToAddresses: email.replyTo === null ? undefined : [email.replyTo],
+                Content: {
+                    Simple: {
+                        Subject: { Data: email.subject, Charset: "UTF-8" },
+                        Body: {
+                            Text: { Data: email.text, Charset: "UTF-8" },
+                            Html: { Data: email.html, Charset: "UTF-8" },
+                        },
+                    },
+                },
+            }),
+        );
+    },
+    {%- if sentry %}
+    report: reportError,
+    {%- else %}
+    report: () => {
+        // No error tracker is configured. Every report site also logs at error level, which the
+        // CloudWatch alarm in cdk/src/contact-form.ts watches.
+    },
+    {%- endif %}
+    emailContext: { siteName: config.SITE_NAME, timeZone: config.TIME_ZONE },
+    maxReceiveCount: config.MAX_RECEIVE_COUNT,
+});
+
+{%- if sentry %}
+export const main = wrapHandler(handler);
+{%- else %}
+export const main = handler;
+{%- endif %}
