@@ -1,9 +1,9 @@
 /**
  * Design tokens for the whole site, emitted as CSS custom properties on :root.
  *
- * This is the only file in the project that may contain a color literal (scripts/seo-check.ts
- * fails the build otherwise). Stylesheets read the custom properties; a React island that needs an
- * MUI theme imports these values directly, so both stay on one source.
+ * Colors belong here and nowhere else. scripts/seo-check.ts fails the build on a color literal in a
+ * stylesheet, a `<style>` block or a `style` attribute anywhere else; it does not read TypeScript,
+ * so a React island must import these values (for its MUI theme too) rather than repeat them.
  */
 export const tokens = {
     color: {

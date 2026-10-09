@@ -124,6 +124,8 @@ const fieldId = (name: string): string => `${form.id}-${name}`;
         document.head.append(script);
     };
 
+    const TOKEN_TIMEOUT_MILLISECONDS = 10_000;
+
     // A token is valid for two minutes and only once, so it is minted at submit time, never on load.
     const mintToken = (siteKey: string, action: string): Promise<string> =>
         new Promise((resolve, reject) => {
@@ -134,8 +136,18 @@ const fieldId = (name: string): string => `${form.id}-${name}`;
                 return;
             }
 
+            // api.js can load while the runtime it fetches from www.gstatic.com is blocked, and then
+            // ready never calls back; give up rather than leave the button disabled for good.
+            window.setTimeout(() => {
+                reject(new Error("reCAPTCHA did not answer"));
+            }, TOKEN_TIMEOUT_MILLISECONDS);
+
             grecaptcha.ready(() => {
-                grecaptcha.execute(siteKey, { action }).then(resolve, reject);
+                try {
+                    grecaptcha.execute(siteKey, { action }).then(resolve, reject);
+                } catch (error) {
+                    reject(error);
+                }
             });
         });
 

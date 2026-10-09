@@ -145,11 +145,13 @@ export class ContactForm extends Construct {
         intake.addToRolePolicy(
             new PolicyStatement({
                 actions: ["secretsmanager:GetSecretValue"],
+                // No hyphen before the wildcard: a secret that has not been stored yet has no random
+                // suffix to match, and a `name-*` grant turns its "not found" into "access denied".
                 resources: [
                     stack.formatArn({
                         service: "secretsmanager",
                         resource: "secret",
-                        resourceName: `${props.recaptchaSecretName}-*`,
+                        resourceName: `${props.recaptchaSecretName}*`,
                         arnFormat: ArnFormat.COLON_RESOURCE_NAME,
                     }),
                 ],

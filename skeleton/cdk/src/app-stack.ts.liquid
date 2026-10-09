@@ -158,9 +158,10 @@ function handler(event) {
             : [{ header: "X-Robots-Tag", value: "noindex, nofollow", override: true }];
 
         const securityHeaders = {
+            // Without includeSubdomains: served from a client's apex domain, it would force HTTPS
+            // onto every subdomain they run, including ones this stack has nothing to do with.
             strictTransportSecurity: {
                 accessControlMaxAge: Duration.days(365),
-                includeSubdomains: true,
                 override: true,
             },
             contentTypeOptions: { override: true },
@@ -313,8 +314,8 @@ function handler(event) {
                 },
                 environment: buildEnv,
             },
-            // OUTPUT because the source directory is the whole project. Only changed objects reach
-            // the website bucket, since the sync itself is incremental.
+            // OUTPUT because the source directory is the whole project. An unchanged build skips
+            // the deployment; a changed one uploads every file again.
             assetHashType: AssetHashType.OUTPUT,
         });
 
@@ -322,23 +323,43 @@ function handler(event) {
             retention: RetentionDays.ONE_WEEK,
         });
 
-        new BucketDeployment(this, "BucketDeployment", {
+        // Hashed assets go up first and are never pruned, so a page still being served from the
+        // previous deploy keeps finding the files it references. Old hashes stay in the bucket.
+        const assetDeployment = new BucketDeployment(this, "AssetDeployment", {
             destinationBucket: websiteBucket,
             logGroup: deploymentLogGroup,
+            sources: [source],
+            exclude: ["*"],
+            include: ["_astro/*"],
+            prune: false,
+            // CloudFront caches by this header too, so a shorter one would send nearly every
+            // asset request back to S3.
+            cacheControl: [CacheControl.fromString("public, max-age=31536000, immutable")],
+            memoryLimit: 1024,
+            // The deployment Lambda unzips the whole site into /tmp; 512 MiB is not enough once a
+            // site has real images.
+            ephemeralStorageSize: Size.gibibytes(2),
+        });
+
+        const pageDeployment = new BucketDeployment(this, "PageDeployment", {
+            destinationBucket: websiteBucket,
+            logGroup: deploymentLogGroup,
+            sources: [source],
+            // /_astro/ belongs to the deployment above; excluding it also keeps the prune off it.
+            exclude: ["_astro/*"],
             // Deletes pages that were removed from the site. Safe only because tryBundle refuses
             // to hand over an empty or partial build.
             prune: true,
             cacheControl: [CacheControl.fromString("public, max-age=0, must-revalidate")],
-            sources: [source],
             // One invalidation of /* per deploy. Per-path invalidation is billed past the first
             // 1,000 paths a month, which a large site reaches in a single deploy.
             distribution,
             distributionPaths: ["/*"],
             waitForDistributionInvalidation: false,
             memoryLimit: 1024,
-            // The deployment Lambda unzips the whole site into /tmp; 512 MiB is not enough once a
-            // site has real images.
             ephemeralStorageSize: Size.gibibytes(2),
         });
+
+        pageDeployment.node.addDependency(assetDeployment);
     }
 }

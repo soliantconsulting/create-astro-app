@@ -262,8 +262,9 @@ const isVerifiedIdentity = async (ses: SESv2Client, identity: string): Promise<b
  * Requests verification for each recipient while the account is in the SES sandbox.
  *
  * A sandboxed account can only deliver to verified addresses, so without this the first real
- * submission is rejected. SES emails each address a link; nothing is delivered to that address
- * until someone clicks it. Does nothing once the account has production access.
+ * submission is rejected. SES emails each newly requested address a link; nothing is delivered to
+ * that address until someone clicks it. An address already awaiting verification gets no second
+ * email, since SES has no resend. Does nothing once the account has production access.
  */
 const verifySandboxRecipients = async (
     ses: SESv2Client,
@@ -276,7 +277,8 @@ const verifySandboxRecipients = async (
         return;
     }
 
-    const pending: string[] = [];
+    const emailed: string[] = [];
+    const stillPending: string[] = [];
 
     for (const recipient of recipients) {
         if (await isVerifiedIdentity(ses, recipient)) {
@@ -285,17 +287,24 @@ const verifySandboxRecipients = async (
 
         try {
             await ses.send(new CreateEmailIdentityCommand({ EmailIdentity: recipient }));
+            emailed.push(recipient);
         } catch (error) {
             if (!(error instanceof AlreadyExistsException)) {
                 throw error;
             }
-        }
 
-        pending.push(recipient);
+            stillPending.push(recipient);
+        }
     }
 
-    if (pending.length > 0) {
-        note(`SES is in the sandbox. Verification emails sent to: ${pending.join(", ")}`);
+    if (emailed.length > 0) {
+        note(`SES is in the sandbox. Verification emails sent to: ${emailed.join(", ")}`);
+    }
+
+    if (stillPending.length > 0) {
+        note(
+            `Still awaiting verification from an earlier request, so SES sent nothing new: ${stillPending.join(", ")}. If that link has expired, delete the identity in the SES console and create it again.`,
+        );
     }
 };
 

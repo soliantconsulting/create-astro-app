@@ -9,10 +9,11 @@
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { indexableRoutes, routes } from "../src/seo/routes.js";
 
-const DIST = new URL("../dist/", import.meta.url).pathname;
-const SRC = new URL("../src/", import.meta.url).pathname;
+const DIST = fileURLToPath(new URL("../dist/", import.meta.url));
+const SRC = fileURLToPath(new URL("../src/", import.meta.url));
 const SITE_URL = process.env.PUBLIC_SITE_URL ?? "http://localhost:4321";
 const ALLOW_INDEXING = process.env.PUBLIC_ALLOW_INDEXING === "true";
 const CSS_BUDGET_BYTES = 70_000;
@@ -218,6 +219,14 @@ const redirectSources = new Set(Object.keys(redirects).map((from) => from.toLowe
 for (const [from, to] of Object.entries(redirects)) {
     if (!from.startsWith("/")) {
         fail("A21 redirects", `Redirect source "${from}" must be a path starting with "/".`);
+    }
+
+    // The CloudFront function looks up the request path, which never carries the query string.
+    if (/[?#]/.test(from)) {
+        fail(
+            "A21 redirects",
+            `Redirect source "${from}" has a query string or fragment, so it can never match. Use the path alone.`,
+        );
     }
 
     // CloudFront matches redirect sources case-insensitively, so compare the same way.

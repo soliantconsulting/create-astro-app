@@ -60,7 +60,8 @@ to input after the page loads.
 **`src/seo/redirects.json` maps old URLs to new ones** (`{ "/about.php": "/about/" }`). When a
 site replaces an older one, every URL that has links or search ranking pointing at it belongs here.
 CloudFront answers them with a 301, matching the path case-insensitively and keeping the query
-string. A target may also be a full URL on another site.
+string. Keys are paths only: the lookup never sees a query string, so `/page.php?id=4` could not
+match. A target may also be a full URL on another site.
 
 **`src/styles/global.css` holds element defaults** (type scale, links, focus ring, reduced motion)
 and a few layout classes. Components style themselves in scoped `<style>` blocks.
@@ -78,9 +79,10 @@ and a few layout classes. Components style themselves in scoped `<style>` blocks
 - a `robots.txt` that lets crawlers into a non-production build, or blocks them in production
 - a page carrying more CSS than the budget, counting inline styles and linked stylesheets
 - an internal link that does not resolve to a built page or file
-- a color literal anywhere in `src` outside `src/theme/tokens.ts`
-- a redirect in `src/seo/redirects.json` that lands on a missing page, chains into another
-  redirect, or hides a page that exists
+- a color literal in a stylesheet, a `<style>` block or a `style` attribute outside
+  `src/theme/tokens.ts` (TypeScript is not checked, so islands import the tokens)
+- a redirect in `src/seo/redirects.json` whose source carries a query string, or that lands on a
+  missing page, chains into another redirect, or hides a page that exists
 {%- if contactForm %}
 
 ## Contact form
@@ -186,6 +188,8 @@ any address is still CHANGE-ME{% endif %}.
   AccessDenied.
 - A viewer-request function resolves directory URLs (`/about/` to `/about/index.html`).
 - Only hashed assets under `/_astro/` are cached as immutable. Documents revalidate.
+- Hashed assets are uploaded before the pages and never deleted, so a page served from the previous
+  deploy mid-deploy still finds its scripts. Old hashes accumulate; they are small.
 - Pages removed from the site are **pruned** from the bucket. The build refuses to hand over an
   empty or partial output, which is what makes pruning safe.
 - Each deploy issues one `/*` invalidation rather than one per file.
