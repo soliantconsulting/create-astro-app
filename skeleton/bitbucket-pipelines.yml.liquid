@@ -15,6 +15,8 @@ definitions:
           - 'self.hosted'
           - 'linux'
         script:
+          # Node 25 and later images no longer ship corepack
+          - npm install --global corepack@latest
           - corepack enable
           - pnpm install
           - pnpm --dir=./cdk install
@@ -34,7 +36,8 @@ definitions:
           - export AWS_ROLE_ARN={{deployRole.arn}}
           - export AWS_WEB_IDENTITY_TOKEN_FILE=$(pwd)/web-identity-token
           - echo $BITBUCKET_STEP_OIDC_TOKEN > $(pwd)/web-identity-token
-          # Install dependencies
+          # Install dependencies (Node 25 and later images no longer ship corepack)
+          - npm install --global corepack@latest
           - corepack enable
           - pnpm install
           # Deploy with CDK

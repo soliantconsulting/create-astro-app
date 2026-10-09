@@ -162,10 +162,10 @@ export const contactFormTask: ListrTask<ContactFormTaskContext> = {
             recaptchaSecretName: recaptchaSecretName(project.name, "staging"),
         };
 
-        const notes: string[] = [];
+        // The task keeps every value assigned to its output on screen (persistentOutput with an
+        // unbounded output bar), so each note is assigned on its own.
         const note = (line: string): void => {
-            notes.push(line);
-            task.output = notes.join("\n");
+            task.output = line;
         };
 
         if (awsEnv === null) {
