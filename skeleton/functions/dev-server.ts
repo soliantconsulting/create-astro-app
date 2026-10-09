@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage } from "node:http";
 import { Temporal } from "temporal-polyfill";
+import { contactForms } from "../src/forms/contact-forms.js";
 import { siteName } from "../src/site.js";
 import { renderEmail } from "./contact-form/email.js";
 import { createIntakeHandler } from "./contact-form/intake.js";
@@ -17,6 +18,7 @@ const PORT = 4399;
 const secret = process.env.RECAPTCHA_SECRET_KEY ?? "";
 
 const handler = createIntakeHandler({
+    forms: contactForms,
     verifyRecaptcha: (token, action) =>
         verifyRecaptcha({
             secret: secret === "" ? null : secret,

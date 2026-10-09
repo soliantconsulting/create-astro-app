@@ -8,6 +8,7 @@ import {
 import { SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
 import { Temporal } from "temporal-polyfill";
 import { z } from "zod";
+import { contactForms } from "../../src/forms/contact-forms.js";
 import { createIntakeHandler } from "./intake.js";
 import { verifyRecaptcha } from "./recaptcha.js";
 {%- if sentry %}
@@ -69,6 +70,7 @@ const loadSecret = async (): Promise<string | null> => {
 };
 
 const handler = createIntakeHandler({
+    forms: contactForms,
     verifyRecaptcha: async (token, action) => {
         let secret: string | null;
 

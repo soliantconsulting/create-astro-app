@@ -3,7 +3,6 @@ import type { Temporal } from "temporal-polyfill";
 import { match } from "ts-pattern";
 import {
     type ContactFormDefinition,
-    findContactForm,
     HONEYPOT_FIELD,
     recaptchaAction,
 } from "../../src/forms/contact-forms.js";
@@ -24,6 +23,8 @@ export type QuarantinedSubmission = {
 };
 
 export type IntakeDependencies = {
+    /** The site's forms, normally `contactForms` from src/forms/contact-forms.ts. */
+    forms: ContactFormDefinition[];
     verifyRecaptcha: (token: string, action: string) => Promise<RecaptchaVerdict>;
     enqueue: (message: ContactMessage) => Promise<void>;
     quarantine: (submission: QuarantinedSubmission) => Promise<void>;
@@ -134,7 +135,7 @@ export const createIntakeHandler =
         }
 
         const { values, wantsJson } = request;
-        const form = findContactForm(values.form ?? "");
+        const form = dependencies.forms.find((candidate) => candidate.id === values.form);
 
         if (form === undefined) {
             return respond("bad-request", wantsJson, null);

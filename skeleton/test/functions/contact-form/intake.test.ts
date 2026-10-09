@@ -8,7 +8,21 @@ import {
 } from "../../../functions/contact-form/intake.js";
 import type { ContactMessage } from "../../../functions/contact-form/message.js";
 import type { RecaptchaVerdict } from "../../../functions/contact-form/recaptcha.js";
-import { HONEYPOT_FIELD } from "../../../src/forms/contact-forms.js";
+import { type ContactFormDefinition, HONEYPOT_FIELD } from "../../../src/forms/contact-forms.js";
+
+// A fixture rather than the site's own forms, so editing src/forms/contact-forms.ts for a client
+// does not change what these tests exercise.
+const testForm: ContactFormDefinition = {
+    id: "contact",
+    subject: "Website contact form",
+    successPath: "/thank-you/",
+    fields: [
+        { name: "name", label: "Name", type: "text", required: true },
+        { name: "email", label: "Email", type: "email", required: true },
+        { name: "phone", label: "Phone", type: "tel", required: false },
+        { name: "message", label: "Message", type: "textarea", required: true },
+    ],
+};
 
 type Harness = {
     handler: ReturnType<typeof createIntakeHandler>;
@@ -26,6 +40,7 @@ const createHarness = (
     const actions: string[] = [];
 
     const handler = createIntakeHandler({
+        forms: [testForm],
         verifyRecaptcha: async (_token, action) => {
             actions.push(action);
             return verdict;
