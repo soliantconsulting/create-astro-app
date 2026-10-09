@@ -57,6 +57,11 @@ Islands live in `src/components/*.tsx` and need a `client:*` directive where the
 example `<SearchBox client:visible />`. Prefer `.astro` for anything that does not need to react
 to input after the page loads.
 
+**`src/seo/redirects.json` maps old URLs to new ones** (`{ "/about.php": "/about/" }`). When a
+site replaces an older one, every URL that has links or search ranking pointing at it belongs here.
+CloudFront answers them with a 301, matching the path case-insensitively and keeping the query
+string. A target may also be a full URL on another site.
+
 **`src/styles/global.css` holds element defaults** (type scale, links, focus ring, reduced motion)
 and a few layout classes. Components style themselves in scoped `<style>` blocks.
 
@@ -73,6 +78,8 @@ and a few layout classes. Components style themselves in scoped `<style>` blocks
 - a `robots.txt` that lets crawlers into a non-production build, or blocks them in production
 - emitted CSS over the size budget
 - a color literal anywhere in `src` outside `src/theme/tokens.ts`
+- a redirect in `src/seo/redirects.json` that lands on a missing page, chains into another
+  redirect, or hides a page that exists
 {%- if contactForm %}
 
 ## Contact form

@@ -200,6 +200,37 @@ for (const path of builtPaths) {
     }
 }
 
+// A21 every legacy redirect lands on a page that exists, in one hop, without hiding a real page.
+// A redirect into a 404 throws away the ranking the old URL had, which is why the map exists.
+const redirects: Record<string, string> = JSON.parse(
+    readFileSync(new URL("../src/seo/redirects.json", import.meta.url), "utf-8"),
+);
+const redirectSources = new Set(Object.keys(redirects).map((from) => from.toLowerCase()));
+
+for (const [from, to] of Object.entries(redirects)) {
+    if (!from.startsWith("/")) {
+        fail("A21 redirects", `Redirect source "${from}" must be a path starting with "/".`);
+    }
+
+    if (builtPaths.has(from)) {
+        fail("A21 redirects", `Redirect from "${from}" would hide the page built at that path.`);
+    }
+
+    if (!to.startsWith("/")) {
+        continue;
+    }
+
+    if (redirectSources.has(to.toLowerCase())) {
+        fail("A21 redirects", `Redirect "${from}" -> "${to}" chains into another redirect.`);
+    }
+
+    const targetPath = to.split(/[?#]/)[0];
+
+    if (!builtPaths.has(targetPath)) {
+        fail("A21 redirects", `Redirect "${from}" -> "${to}" points at a page that was not built.`);
+    }
+}
+
 // A16 robots.txt matches the environment: only production may be crawled
 const robots = readDistFile("robots.txt") ?? "";
 const disallowsAll = /^Disallow:\s*\/\s*$/m.test(robots);
